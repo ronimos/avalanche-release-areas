@@ -259,7 +259,7 @@ class TestPrimitiveFunctions:
 # ---------------------------------------------------------------------------
 
 _CSV = Path(__file__).resolve().parent.parent / (
-    "outputs/little_prof/analysis/meloche_features_2026-01-18.csv"
+    "data/little_prof/features/meloche_features_all_2026-01-18.csv"
 )
 
 _RHO_FIXED   = 280.0
