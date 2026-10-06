@@ -176,7 +176,7 @@ def write_scenario(scenario_dir: Path,
     total_vol  = 0.0
 
     if release_polygon is not None and not release_polygon.is_empty:
-        # Defensive hole-fill at the write boundary: even if propagate_release
+        # Defensive hole-fill at the write boundary: even if propagate_crack
         # already filled, any intervening clip/reproject can reintroduce slivers.
         # com1DFA needs a simply-connected release area; idempotent if clean.
         from release_areas.release_geometry import fill_polygon_holes

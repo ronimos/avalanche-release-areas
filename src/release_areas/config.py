@@ -2,7 +2,7 @@
 config.py — Default physical and operational parameters for release_areas.
 
 All values can be overridden via keyword arguments to individual functions
-or via a TOML config file passed to run_scenarios.py.
+or via a TOML config file passed to generate_scenarios.py.
 """
 
 from __future__ import annotations

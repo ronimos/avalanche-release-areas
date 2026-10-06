@@ -49,6 +49,7 @@ from release_areas.release_geometry import (
     make_release_polygon_2d,
     plot_release_comparison,
     load_observed_polygon,
+    load_observed_polygons,
 )
 from release_areas.scenario_writer import write_scenario
 from release_areas.snowpack_features import geojson_to_mask
@@ -140,13 +141,16 @@ def main():
     else:
         start_zone_mask = geojson_to_mask(sz_path, dem.shape, transform)
 
+    observed_polygons = []
     observed_polygon = None
     if args.release_poly:
         try:
-            observed_polygon = load_observed_polygon(Path(args.release_poly))
-            print(f"Observed polygon: {observed_polygon.area:.0f} m2")
+            observed_polygons = load_observed_polygons(Path(args.release_poly))
+            for poly, lbl in observed_polygons:
+                print(f"Observed polygon ({lbl}): {poly.area:.0f} m2")
+            observed_polygon = observed_polygons[0][0] if observed_polygons else None
         except Exception as e:
-            print(f"Warning: could not load observed polygon: {e}")
+            print(f"Warning: could not load observed polygons: {e}")
 
     # --- Select top-N trigger clusters (lowest Sk38 = most unstable) ---
     sk38_col = 'min_sk38' if 'min_sk38' in features_df.columns else 'sk38_min'
@@ -369,7 +373,7 @@ def main():
     fig_path = out_dir / 'release_comparison.png'
     plot_release_comparison(
         meloche_polygons  = mel_polys,
-        observed_polygon  = observed_polygon,
+        observed_polygons = observed_polygons,
         dem               = dem,
         transform         = transform,
         start_zone_mask   = start_zone_mask,

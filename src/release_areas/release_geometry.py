@@ -2,18 +2,21 @@
 release_geometry.py — Physically-motivated avalanche release polygon generation.
 
 Provides:
-    find_stauchwall()          Walk downslope from trigger until slope < threshold
+    find_stauchwall()            Walk downslope from trigger until slope < threshold
     estimate_cross_slope_width() Cross-slope arrest width from Gaume (2015) / θ
-    project_along_aspect()     Project a UTM point distance along slope aspect
-    make_release_polygon_2d()  Full 2D release polygon from four constraints:
-                                 1. Meloche A_ca (upslope)
-                                 2. ~28° slope threshold (downslope / stauchwall)
-                                 3. θ cross-slope gradient (flanks)
-                                 4. Start zone KML (hard lateral boundary)
-    rasterize_release_polygon() Burn polygon to a depth raster on the DEM grid
-    plot_release_comparison()   Meloche polygons vs observed release area figure
+    project_along_aspect()       Project a UTM point distance along slope aspect
+    make_release_polygon_2d()    Full 2D release polygon from four constraints:
+                                   1. Meloche A_ca (upslope)
+                                   2. ~28° slope threshold (downslope / stauchwall)
+                                   3. θ cross-slope gradient (flanks)
+                                   4. Start zone KML (hard lateral boundary)
+    propagate_crack()            Spatial crack propagation: BFS cluster flood-fill
+                                   with per-direction arrest criteria
+    rasterize_release_polygon()  Burn polygon to a depth raster on the DEM grid
+    load_observed_polygon()      Load a GeoJSON polygon and reproject to UTM
+    plot_release_comparison()    Meloche polygons vs observed release area figure
 
-No CLI. Import from scripts/run_scenarios.py.
+No CLI. Used by release_areas.generate_scenarios and release_areas.plot_release.
 
 References
 ----------
@@ -301,7 +304,7 @@ def make_release_polygon_2d(
         return poly
 
     if use_propagation and not meloche_df.empty:
-        polygon, failed = propagate_release(
+        polygon, failed = propagate_crack(
             trigger_cluster_id = trigger_cluster_id,
             meloche_df         = meloche_df,
             cluster_map        = cluster_map,
@@ -319,7 +322,7 @@ def make_release_polygon_2d(
             polygon = _clip_polygon(polygon)
             if polygon is not None:
                 return polygon
-        print(f"  propagate_release returned None for cluster {trigger_cluster_id}"
+        print(f"  propagate_crack returned None for cluster {trigger_cluster_id}"
               f" — falling back to rectangle")
 
     _, aspect_grid = compute_slope_aspect(dem)
@@ -356,10 +359,10 @@ def make_release_polygon_2d(
 
 
 # -----------------------------------------------------------------------
-# Cluster-level crack propagation (BFS flood-fill)
+# Spatial crack propagation
 # -----------------------------------------------------------------------
 
-def propagate_release(
+def propagate_crack(
         trigger_cluster_id: int,
         meloche_df: pd.DataFrame,
         cluster_map: np.ndarray,
@@ -376,8 +379,13 @@ def propagate_release(
         max_clusters: int = 500,
         wave_callback=None):
     """
-    Identify release zone as the connected region of clusters with
-    Pi1 >= Pi1_trigger reachable from the trigger cluster.
+    Identify release zone as the connected region of clusters reachable
+    from the trigger where crack arrest criteria are not met.
+
+    Starting from the trigger cluster, expands outward to neighbouring
+    clusters in order of proximity. A cluster is included if it passes
+    distance caps (upslope A_ca, downslope stauchwall, lateral Gaume width),
+    slope, slab thickness, and elastic-length continuity checks.
     """
     from collections import deque
     from shapely.geometry import MultiPolygon
@@ -712,22 +720,106 @@ def rasterize_release_polygon(polygon,
 
 
 # -----------------------------------------------------------------------
+# GeoJSON loader (shared by scripts)
+# -----------------------------------------------------------------------
+
+def load_observed_polygon(path, dst_epsg: int = 32613):
+    """Load a GeoJSON polygon file and reproject to UTM (default EPSG:32613)."""
+    import json
+    import re
+    from shapely.geometry import shape, Polygon, MultiPolygon
+    from shapely.ops import unary_union
+    from pyproj import Transformer
+
+    with open(str(path)) as f:
+        gj = json.load(f)
+
+    polys = [shape(feat['geometry']) for feat in gj['features']]
+    merged = unary_union(polys)
+
+    src_epsg = 4326
+    crs_node = gj.get('crs', {}).get('properties', {}).get('name', '')
+    m = re.search(r'EPSG:+(\d+)', crs_node, re.IGNORECASE)
+    if m:
+        src_epsg = int(m.group(1))
+
+    if src_epsg != dst_epsg:
+        tr = Transformer.from_crs(f'EPSG:{src_epsg}', f'EPSG:{dst_epsg}', always_xy=True)
+
+        def _reproj(poly):
+            if poly.geom_type == 'Polygon':
+                xs, ys = zip(*poly.exterior.coords)
+                xs2, ys2 = tr.transform(xs, ys)
+                return Polygon(zip(xs2, ys2))
+            return MultiPolygon([_reproj(p) for p in poly.geoms])
+
+        merged = _reproj(merged)
+
+    return merged
+
+
+def _label_from_release_path(path) -> str:
+    """Derive a human-readable label from an avalanche_release_area_YYYYMMDD.geojson path."""
+    import re
+    m = re.search(r'(\d{8})', Path(path).stem)
+    if m:
+        d = m.group(1)
+        return f"Observed {d[:4]}-{d[4:6]}-{d[6:8]}"
+    return Path(path).stem
+
+
+def load_observed_polygons(primary_path, dst_epsg: int = 32613) -> list:
+    """Load all avalanche_release_area_*.geojson files from the same directory as primary_path.
+
+    Returns a list of (polygon, label) tuples sorted by filename so that new
+    release areas added to the boundaries directory appear automatically.
+    """
+    if primary_path is None:
+        return []
+    parent = Path(primary_path).parent
+    entries = []
+    for p in sorted(parent.glob('avalanche_release_area_*.geojson')):
+        try:
+            poly = load_observed_polygon(p, dst_epsg)
+            entries.append((poly, _label_from_release_path(p)))
+        except Exception as e:
+            print(f"Warning: could not load {p.name}: {e}")
+    return entries
+
+
+# -----------------------------------------------------------------------
 # Comparison plot
 # -----------------------------------------------------------------------
 
+_OBS_PALETTE = ['#E31A1C', '#FF7F00', '#6A3D9A', '#8B4513']
+
+
+def _poly_exterior_xy(geom):
+    """Return exterior (xs, ys), falling back to largest part for MultiPolygon."""
+    if geom.geom_type == 'MultiPolygon':
+        geom = max(geom.geoms, key=lambda p: p.area)
+    return geom.exterior.xy
+
+
 def plot_release_comparison(
         meloche_polygons: list,
-        observed_polygon,
+        observed_polygons: list,
         dem: np.ndarray,
         transform,
         start_zone_mask=None,
         trigger_labels=None,
         trigger_centroids=None,
+        trigger_ious=None,
         most_likely_polygon=None,
         most_likely_label=None,
         out_path=None,
         title: str = "Release polygon comparison") -> None:
-    """Plot Meloche-derived polygons vs observed release area."""
+    """Plot Meloche-derived polygons vs observed release area(s).
+
+    observed_polygons — list of (shapely_geometry, label_str) tuples.
+    All matching avalanche_release_area_*.geojson files in the boundaries
+    directory are loaded and rendered so new ones appear automatically.
+    """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -754,11 +846,15 @@ def plot_release_comparison(
                    extent=extent, origin='upper')
 
     obs_area = 0.0
-    if observed_polygon is not None and not observed_polygon.is_empty:
-        obs_area = observed_polygon.area
-        xs, ys = observed_polygon.exterior.xy
-        ax.fill(xs, ys, alpha=0.30, color='red', zorder=3)
-        ax.plot(xs, ys, color='red', linewidth=2.5, zorder=4)
+    for j, (obs_poly, obs_label) in enumerate(observed_polygons or []):
+        if obs_poly is None or obs_poly.is_empty:
+            continue
+        oc = _OBS_PALETTE[j % len(_OBS_PALETTE)]
+        xs, ys = _poly_exterior_xy(obs_poly)
+        ax.fill(xs, ys, alpha=0.30, color=oc, zorder=3)
+        ax.plot(xs, ys, color=oc, linewidth=2.5, zorder=4)
+        if j == 0:
+            obs_area = obs_poly.area
 
     colors    = plt.cm.tab10.colors
     mel_areas = []
@@ -767,7 +863,7 @@ def plot_release_comparison(
         if poly is None or poly.is_empty:
             continue
         color = colors[i % len(colors)]
-        xs, ys = poly.exterior.xy
+        xs, ys = _poly_exterior_xy(poly)
         ax.fill(xs, ys, alpha=0.20, color=color, zorder=2)
         ax.plot(xs, ys, color=color, linewidth=1.8, alpha=0.85, zorder=5)
         mel_areas.append(poly.area)
@@ -788,7 +884,7 @@ def plot_release_comparison(
     ml_area = 0.0
     if most_likely_polygon is not None and not most_likely_polygon.is_empty:
         ml_area = most_likely_polygon.area
-        mxs, mys = most_likely_polygon.exterior.xy
+        mxs, mys = _poly_exterior_xy(most_likely_polygon)
         ax.plot(mxs, mys, color='white', linewidth=4.2, zorder=7)
         ax.plot(mxs, mys, color='black', linewidth=2.4, linestyle=(0, (6, 3)),
                 zorder=8)
@@ -806,14 +902,21 @@ def plot_release_comparison(
         stats += "\nMost likely:    %6.0f m2" % ml_area
         if obs_area:
             stats += "\n  ML/Obs ratio:   %.2f" % (ml_area / obs_area)
+    if trigger_ious and any(v > 0 for v in trigger_ious):
+        best_i = int(np.argmax(trigger_ious))
+        stats += "\nBest IoU:         %.3f  (T%d)" % (trigger_ious[best_i], best_i + 1)
     ax.text(0.02, 0.02, stats, transform=ax.transAxes, fontsize=8.5,
             verticalalignment='bottom', fontfamily='monospace',
             bbox=dict(boxstyle='round', facecolor='white',
                       edgecolor='gray', alpha=0.85))
 
     handles = []
-    handles.append(Line2D([0],[0], color='red', linewidth=2.5,
-           label="Observed Jan 18  (%.0f m2)" % obs_area))
+    for j, (obs_poly, obs_label) in enumerate(observed_polygons or []):
+        if obs_poly is None or obs_poly.is_empty:
+            continue
+        oc = _OBS_PALETTE[j % len(_OBS_PALETTE)]
+        handles.append(Line2D([0], [0], color=oc, linewidth=2.5,
+                              label=f"{obs_label}  ({obs_poly.area:.0f} m²)"))
     handles.append(Line2D([0],[0], color='limegreen', linewidth=2.0, label='Start zone'))
     if ml_area:
         handles.append(Line2D([0],[0], color='black', linewidth=2.4,
@@ -825,8 +928,10 @@ def plot_release_comparison(
             continue
         color = colors[i % len(colors)]
         lbl   = trigger_labels[i] if trigger_labels else ("T%d" % (i+1))
+        iou_str = ("  IoU=%.3f" % trigger_ious[i]
+                   if trigger_ious and i < len(trigger_ious) else "")
         handles.append(Patch(facecolor=color, alpha=0.5, edgecolor=color,
-                             label="%s  (%.0f m2)" % (lbl, poly.area)))
+                             label="%s  (%.0f m2)%s" % (lbl, poly.area, iou_str)))
 
     ax.legend(handles=handles, loc='upper right', fontsize=7.5, framealpha=0.90)
     ax.set_title(title, fontsize=11)

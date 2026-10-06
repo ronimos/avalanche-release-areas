@@ -2,7 +2,7 @@
 
 Sources: Meloche et al. (2025, JGR Earth Surface), Meloche et al. (ISSW 2026),
 Meloche et al. (2026, TARP report). The energy-cap functions are a hypothesis
-(see arrest_indices.md), not published results.
+(see docs/release_area_methods.md §3), not published results.
 
 Units: SI (Pa, m, kg/m3, J/m2); angles in degrees.
 """
@@ -108,7 +108,7 @@ def shear_gradient(x, tau_p):
 # ---------------------------------------------------------------------------
 # Energy-cap framework (hypothesis)
 # ---------------------------------------------------------------------------
-R_FIT = 0.48  # fitted from Meloche et al. 2025 Fig. 8 (two runs); see arrest_indices.md
+R_FIT = 0.48  # fitted from Meloche et al. 2025 Fig. 8 (two runs); see docs/release_area_methods.md §3
 
 
 def slab_energy_cap(sigma_t, h, E, nu=0.3):
@@ -135,7 +135,7 @@ def energy_ratio(tau_p, K_wl, sigma_t, h, E, delta=1.0, tau_r=0.0, nu=0.3):
 
 def critical_strength(sigma_t, h, E, K_wl, delta=1.0, tau_r=0.0, R=R_FIT, nu=0.3):
     """tau_p* where G_c(tau_p*) = R * G_slab.
-    R may be a number or 'dynamic' (use k_x/k_f at 1.6 c_s; needs rho via critical_strength_dynamic)."""
+    R must be a number; pass R='dynamic' to evaluate() to resolve it via k_x/k_f first."""
     G_cap = R * slab_energy_cap(sigma_t, h, E, nu)
     return tau_r + np.sqrt(2.0 * K_wl * G_cap / (1.0 + delta))
 

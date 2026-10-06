@@ -24,6 +24,10 @@ dependencies = [
     "fastkml>=0.12",
 ]
 
+[project.scripts]
+generate-scenarios = "release_areas.generate_scenarios:main"
+plot-release       = "release_areas.plot_release:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7",

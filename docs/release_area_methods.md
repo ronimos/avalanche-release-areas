@@ -1,4 +1,4 @@
-# arrest_indices.py: methods
+# Avalanche Release Area Delineation: Methods and Jan 18 2026 Validation
 
 Crack-arrest indices for dry-slab avalanches in two groups:
 
@@ -200,7 +200,39 @@ Without θ, the energy framework still gives τp* and R0 = G_c(τp0)/G_slab, a p
 
 ---
 
-## 5. Application to the Jan 18 2026 avalanche — Little Professor
+## 5. Trigger cluster pipeline
+
+The start zone is partitioned into spatial clusters via a pre-computed raster (`cluster_map.tif`). Each cluster covers a contiguous set of DEM pixels and corresponds to one SNOWPACK simulation profile; it is the basic operational unit for all stability and crack-arrest computations.
+
+### Per-cluster feature extraction (`profile_features`)
+
+`profile_features()` identifies the basal weak layer by scanning upward from the snowpack base for the first continuous FC/DH grain sequence (grain-type codes 4xx and 5xx). Everything above the WL top is labelled the slab. The function returns:
+
+- **Slab**: density-weighted mean density (ρ), slope-normal thickness (h), Young's modulus E and tensile strength σt from density parameterisations, and dominant grain class.
+- **WL**: mean shear strength (τp), grain size, burial depth, and thickness (D_wl).
+- **Interface stability indices**: Sk38, SSI, SN38, and critical cut length r_c from layers within 5 cm of the WL top.
+- **Derived elastic quantities**: K_wl = G_wl / D_wl, Λ (upslope elastic length), and slab energy cap G_slab.
+
+### Spatial shear gradient θ (`compute_meloche_features`)
+
+θ = ∂τp/∂x is approximated from k-nearest spatial neighbours (k = 6). For each cluster centroid, the k closest centroids are located via a ball-tree on pixel-grid coordinates. θ is the mean of |τp_i − τp_j| / d_ij across those pairs (absolute value; the gradient enters all arrest-length formulae squared or via |θ| implicitly). Clusters with no valid neighbours or θ < 10⁻⁶ Pa m⁻¹ are excluded from arrest-index output.
+
+### Trigger cluster selection (`generate_scenarios`)
+
+Candidate trigger locations are selected by a four-stage filter applied to all start-zone clusters, then ranked by stability index:
+
+| Stage | Criterion | Rationale |
+|---|---|---|
+| 1 | τg ≥ 40 Pa; slope ≥ (stauchwall_deg + 2°); Sk38 < 1.0 | Minimum gravitational driving stress, terrain steep enough to sustain crack propagation, and unstable stability index |
+| 2 | 0.5 m ≤ h ≤ max_slab_thickness (default 2.0 m; 1.5 m for skier scenarios) | Exclude implausibly thin or anomalously thick slab columns |
+| 3 | Elevation ≥ P50 of remaining candidates | Prefer upper start-zone cells — lower cells may be in runout or deposition |
+| 4 | Π₁ ≥ median of candidates (propagation gate) | Π₁ = τg / (θ Λ √(1+δ)); retain clusters where the dimensionless driving ratio exceeds the group median, i.e., where propagation is relatively more likely |
+
+Survivors are ranked by Sk38 ascending (most unstable first). The top N (default 5, `config.N_TOP_TRIGGERS`) are passed to the BFS release-polygon builder. Each trigger yields one or more release polygons depending on the `--size-factors` and `--depth-pcts` sweep.
+
+---
+
+## 6. Application to the Jan 18 2026 avalanche — Little Professor
 
 ### Input ranges from SNOWPACK
 
@@ -222,8 +254,7 @@ Jan 18 slab is ~3× thicker and ~30% denser than the JGR calibration. The WL is 
 
 ### Arrest length comparison
 
-Figures from `outputs/little_prof/plots/arrest_indices_2026-01-18.png`.
-Numbers from `scripts/plot_arrest_indices_jan18.py` (enriched from regenerated CSV, Oct 6 pipeline run, 5176 clusters).
+Numbers from a standalone analysis run (Oct 6 pipeline, 5176 clusters; that script is no longer in the repo).
 
 **Summary table — medians per group**
 
@@ -265,21 +296,55 @@ Eq. 20 outperforms the energy cap on this event: IoU 0.353 vs 0.240–0.256. R0 
 
 R0 is the cleanest single-number discriminant that does not require θ. A cluster with R0 < R_FIT (0.48) means the WL at that point cannot absorb the slab energy — crack propagates. The Jan 18 release zone has median R0 = 0.4 (below threshold) while adjacent = 0.5 (above threshold), consistent with the observed release boundary.
 
+### BFS scenario pipeline results
+
+The BFS crack-propagation pipeline (`generate_scenarios.py`) selects top-5 trigger clusters by lowest Sk38 and builds a release polygon for each via flood-fill with per-direction arrest criteria. Observed crown polygon: `data/little_prof/boundaries/avalanche_release_area_20260118.geojson` (4 550 m²).
+
+Filter chain output (Jan 18 2026):
+- Start-zone clusters with features: 1608
+- After τg ≥ 40 Pa / slope ≥ 30° / Sk38 < 1.0: 493 → 408 → 204
+- After slab thickness 0.5–2.0 m: 102
+- After elevation ≥ P50: 102 → top candidates
+- After Π₁ ≥ median: 102 → 51 final
+
+Top-5 scenarios — size_factor = 1.0, depth_percentile = 50:
+
+| Scenario | Trigger cid | Sk38 | A_ca (m) | Release area (m²) | IoU vs observed |
+|---|---|---|---|---|---|
+| scenario_001 | 2859 | 0.72 | 49 | 5 404 | **0.653** |
+| scenario_002 | 5656 | 0.72 | 43 | 5 219 | 0.578 |
+| scenario_003 | 2858 | 0.74 | 32 | 4 805 | 0.493 |
+| scenario_004 | 348  | 0.75 | 62 | 5 812 | 0.647 |
+| scenario_005 | 1068 | 0.75 | 28 | 5 329 | **0.660** ← best |
+
+**Summary:** observed 4 550 m² · modelled P50 5 329 m² · ratio 1.17 · best IoU 0.660 (scenario_005, cid=1068).
+
+All five scenarios overlap the observed crown well (IoU > 0.49). The spread in release area (4 800–5 800 m²) reflects variation in trigger location rather than slab properties, since all five use size_factor = 1.0.
+
+![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown (4 550 m²). Coloured outlines: five modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
+
+*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:32613). Start zone boundary in green. All five modelled polygons overlap the observed crown substantially; best IoU = 0.660 (T5, cid=1068, Sk38=0.75).*
+
+To reproduce:
+
+```bash
+python -m release_areas.generate_scenarios \
+    --features-csv  data/little_prof/features/all_start_zone_features_2026-01-18.csv \
+    --meloche-csv   data/little_prof/features/meloche_features_all_2026-01-18.csv \
+    --cluster-map   data/little_prof/spatial/cluster_map.tif \
+    --dem           data/little_prof/dem_1m.tif \
+    --start-zone    data/little_prof/boundaries/start_zone.kml \
+    --release-poly  data/little_prof/boundaries/avalanche_release_area_20260118.geojson \
+    --out-dir       outputs/little_prof
+```
+
+Output: `outputs/little_prof/release_comparison.png` — modelled release polygons overlaid on DEM hillshade with per-trigger IoU. Any `avalanche_release_area_*.geojson` file added to `data/little_prof/boundaries/` is automatically loaded and shown on the plot in a distinct colour.
+
 ### IoU evaluation
 
-`scripts/plot_arrest_indices_jan18.py` includes a threshold sweep: for each metric (R0, A_ca_brittle, A_ca_energy δ=0/δ=1), it classifies clusters below a percentile threshold as "predicted release", rasterizes them using `cluster_map.npy`, and computes IoU, recall and precision against `data/boundaries/avalanche_release_area.geojson`.
+The IoU figures in §5.2 came from a threshold sweep: for each metric (R0, A_ca_brittle, A_ca_energy δ=0/δ=1), clusters below a percentile threshold were classified as "predicted release", rasterized using `cluster_map.tif`, and IoU/recall/precision were computed against `data/little_prof/boundaries/avalanche_release_area_20260118.geojson`. That sweep script is no longer in the repo.
 
-This is different from `scripts/release_area_IoU.py`, which evaluates AvaFrame flow/runout scenario polygons against the observed deposit boundary — a downstream step that requires arrest indices only indirectly through the scenario weights.
-
-Run the evaluation:
-
-```
-python scripts/plot_arrest_indices_jan18.py --date 2026-01-18
-```
-
-Output:
-- `outputs/little_prof/plots/arrest_indices_2026-01-18.png` — 4-panel figure
-- Console: summary table (median per group) and IoU sweep table
+The BFS pipeline IoU (§5.4) is a polygon-level IoU: the modelled GeoJSON polygon is intersected directly with the observed crown polygon, no rasterization.
 
 ### Hardcoded parameter sensitivity
 
