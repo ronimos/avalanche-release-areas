@@ -7,8 +7,8 @@ Physically-motivated avalanche release zone delineation using SNOWPACK weak-laye
 Given pre-computed SNOWPACK cluster features (slab density, WL shear strength, slab thickness, elastic length Λ), this package:
 
 1. Computes Meloche (2025) crack-arrest indices Π₁, Π₂, A_ca per cluster
-2. Runs a BFS crack-propagation flood-fill from each candidate trigger cluster
-3. Outputs release polygons for each scenario (trigger × size factor × depth percentile)
+2. Runs spatial crack propagation from each candidate trigger cluster (outward flood-fill with per-direction arrest criteria)
+3. Outputs one release polygon per trigger by default (the most likely scenario); optional sweep over size factors and depth percentiles
 4. Compares against an observed release polygon (IoU metric)
 
 No zarr, no SNOWPACK, no NWP — just CSVs + rasters.
@@ -30,13 +30,18 @@ No zarr, no SNOWPACK, no NWP — just CSVs + rasters.
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .          # runtime only
+pip install -e ".[dev]"   # + pytest for running tests
 ```
 
 ## Quick start
 
+Run from the repo root. All paths are relative to it.
+
+**Step 1 — generate release scenarios** (one polygon per trigger by default):
+
 ```bash
-python scripts/run_scenarios.py \
+python -m release_areas.generate_scenarios \
     --features-csv  data/little_prof/features/all_start_zone_features_2026-01-18.csv \
     --meloche-csv   data/little_prof/features/meloche_features_all_2026-01-18.csv \
     --cluster-map   data/little_prof/spatial/cluster_map.tif \
@@ -46,15 +51,27 @@ python scripts/run_scenarios.py \
     --out-dir       outputs/little_prof
 ```
 
+Outputs written to `--out-dir`:
+
+| File | Description |
+|------|-------------|
+| `scenarios/scenario_001/release.geojson` | Release polygon for trigger 1 (GeoJSON, UTM 13N) |
+| `scenarios/scenario_001/params.json` | Trigger cluster ID, Π₁, τ_g, arrest distances |
+| `scenario_summary.csv` | One row per scenario — area, IoU, trigger cluster |
+| `release_comparison.png` | Map overlay: modelled vs observed release |
+
+**Step 2 — re-plot from saved scenarios** (reads GeoJSONs, no recomputation):
+
 ```bash
-python scripts/plot_arrest_indices.py \
-    --meloche-csv   data/little_prof/features/meloche_features_all_2026-01-18.csv \
-    --cluster-map   data/little_prof/spatial/cluster_map.tif \
+python -m release_areas.plot_release \
+    --scenario-dir  outputs/little_prof/scenarios \
     --dem           data/little_prof/dem_1m.tif \
+    --start-zone    data/little_prof/boundaries/start_zone.kml \
     --release-poly  data/little_prof/boundaries/avalanche_release_area_20260118.geojson \
-    --column        A_ca_brittle \
-    --out           outputs/arrest_index_map.png
+    --out           outputs/little_prof/release_comparison.png
 ```
+
+After `pip install -e .` the same commands are also available as `generate-scenarios` and `plot-release` console scripts.
 
 ## Run tests
 
@@ -63,6 +80,8 @@ pytest tests/ -v
 ```
 
 ## Physical model
+
+See [`docs/crack_arrest_indices_reference.md`](docs/crack_arrest_indices_reference.md) for full derivations, calibration, and the Jan 18 2026 application.
 
 Crack-arrest scaling law (Meloche et al. 2025, JGR Earth Surface):
 
@@ -76,14 +95,14 @@ Where:
 - θ = |∇τ_p| — WL shear-strength spatial gradient (Pa/m)
 - Λ = √(E′h/K_wl) — elastic length of the slab-WL system (m)
 - δ = 1.0 — softening coefficient (Meloche Table 1)
-- L_t — characteristic length from fracture toughness
+- L_t = σ_t / k_f — tensile length (distance to first slab fracture, m)
 - σ_t — slab tensile strength (Pa)
 
 ## Reference
 
-Meloche, J., Gaume, J., Gauthier, D., Hendrikx, J., & Simenhois, R. (2025).
-Spatial crack arrest in weak snow layers: field validation of a scaling law.
-*Journal of Geophysical Research: Earth Surface*.
+Meloche, F., Bobillier, G., Guillet, L., Gauthier, F., Langlois, A., & Gaume, J. (2025).
+Modeling crack arrest in snow slab avalanches: Toward estimating avalanche release sizes.
+*JGR Earth Surface*, 130(12), e2025JF008470.
 doi:10.1029/2025JF008470
 
 ## License
