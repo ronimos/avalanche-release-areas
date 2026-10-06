@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "release-areas"
+version = "0.1.0"
+description = "Avalanche release zone delineation from SNOWPACK features (Meloche et al. 2025)"
+authors = [
+    {name = "Ron Simenhois"},
+]
+license = {text = "CC BY 4.0"}
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "shapely>=2.0",
+    "rasterio>=1.3",
+    "pyproj>=3.5",
+    "scikit-learn>=1.3",
+    "matplotlib>=3.7",
+    "fastkml>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
