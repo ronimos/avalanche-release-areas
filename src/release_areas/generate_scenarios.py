@@ -110,8 +110,9 @@ def main():
                     help='Depth percentiles (default: [0.5] — most likely only)')
     ap.add_argument('--stauchwall-deg',     type=float, default=28.0,
                     help='Slope threshold for stauchwall arrest (default: 28°)')
-    ap.add_argument('--max-slab-thickness', type=float, default=1.5,
-                    help='Maximum slab thickness for trigger candidates (default: 1.5 m)')
+    ap.add_argument('--max-slab-thickness', type=float, default=2.0,
+                    help='Maximum slab thickness for trigger candidates (m). '
+                         'Use 1.5 for skier-triggered scenarios, 2.0 for natural/large-slab events.')
     ap.add_argument('--mode3-scale',        type=float, default=1.5,
                     help='Mode III lateral arrest multiplier (default: 1.5)')
     args = ap.parse_args()
@@ -156,7 +157,8 @@ def main():
     MAX_SLAB_THICKNESS = args.max_slab_thickness
     MIN_SLOPE_TRIGGER  = args.stauchwall_deg + 2.0
 
-    candidate_ids = list(features_df.index)
+    sz_cids = set(int(c) for c in np.unique(cluster_map[start_zone_mask]) if c > 0)
+    candidate_ids = [cid for cid in features_df.index if cid in sz_cids]
     print(f"  Start zone clusters with features: {len(candidate_ids)}")
 
     def _scalar(df, cid, col):
