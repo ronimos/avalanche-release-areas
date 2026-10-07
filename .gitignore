@@ -12,3 +12,5 @@ outputs/
 *.png
 *.pdf
 .DS_Store
+# Reference papers — PDFs, some misnamed .md; never commit
+papers/
