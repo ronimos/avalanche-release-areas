@@ -77,6 +77,26 @@ def dynamic_gradient(k_f, E, rho, nu=0.3, speed_ratio=1.6):
     return k_f * dynamic_factor(E, rho, nu, speed_ratio)
 
 
+# Crack-speed regimes. Upslope (mode II) cracks run supershear; mode III
+# (antiplane) cracks cannot exceed the shear wave speed.
+MODE2_SPEED_RATIO = 1.6   # adot / c_s upslope, Meloche et al. (2025)
+MODE3_SPEED_RATIO = 1.0   # adot / c_s cross-slope cap, Broberg (1989)
+
+
+def mode3_length_ratio(E, rho, nu=0.3,
+                       speed_ratio_along=MODE2_SPEED_RATIO,
+                       speed_ratio_cross=MODE3_SPEED_RATIO):
+    """L_dyn,III / L_dyn,II = k_x,II / k_x,III.
+
+    A slower crack builds slab tension faster per unit advance, so the mode III
+    speed cap shortens the distance to first slab fracture. Since
+    c_s^2/c_p^2 = (1-nu)/2, E and rho cancel and this reduces to a function of
+    nu and the two speed ratios alone: 0.712 at nu=0.3.
+    """
+    return (dynamic_factor(E, rho, nu, speed_ratio_along)
+            / dynamic_factor(E, rho, nu, speed_ratio_cross))
+
+
 def tensile_length(sigma_t, k):
     """sigma_t / k; inf if k <= 0."""
     k = np.asarray(k, dtype=float)
@@ -153,21 +173,30 @@ def arrest_length_energy(tau_p0, tau_p_star, theta):
 # ---------------------------------------------------------------------------
 def evaluate(rho, h, psi_deg, E, sigma_t, D_wl, G_wl, theta, a_c=None, a_sc=None,
              nu=0.3, phi_deg=27.0, delta=1.0, C=0.045, tau_p0=None, R=R_FIT,
-             use_residual=False):
+             use_residual=False, speed_ratio_along=MODE2_SPEED_RATIO,
+             speed_ratio_cross=MODE3_SPEED_RATIO):
     """All indices for one slab / weak-layer configuration.
-    R: critical energy ratio (number) or 'dynamic' to use k_x/k_f."""
+    R: critical energy ratio (number) or 'dynamic' to use k_x/k_f.
+    speed_ratio_along / speed_ratio_cross: crack speed as a multiple of c_s for
+    mode II (supershear) and mode III (capped at c_s) propagation."""
     Lam = elastic_length(E, h, D_wl, G_wl, nu)
     K_wl = weak_layer_stiffness(G_wl, D_wl)
     tau_g = gravitational_shear(rho, h, psi_deg)
     tau_r = residual_shear(rho, h, psi_deg, phi_deg)
     k_f = float(tension_gradient(rho, psi_deg, phi_deg))
-    k_x = float(dynamic_gradient(k_f, E, rho, nu))
+    k_x = float(dynamic_gradient(k_f, E, rho, nu, speed_ratio_along))
+    k_x_cross = float(dynamic_gradient(k_f, E, rho, nu, speed_ratio_cross))
     L_t = float(tensile_length(sigma_t, k_f))
     L_dyn = float(tensile_length(sigma_t, k_x))
+    L_dyn_cross = float(tensile_length(sigma_t, k_x_cross))
 
     out = dict(Lambda=Lam, Lambda_cross=elastic_length_cross(E, h, D_wl, G_wl, nu),
                K_wl=K_wl, tau_g=tau_g, tau_r=tau_r, k_f=k_f, k_x=k_x,
-               L_t=L_t, L_dyn=L_dyn, sustained=psi_deg > phi_deg)
+               k_x_cross=k_x_cross, L_t=L_t, L_dyn=L_dyn,
+               L_dyn_cross=L_dyn_cross,
+               mode3_length_ratio=float(mode3_length_ratio(
+                   E, rho, nu, speed_ratio_along, speed_ratio_cross)),
+               sustained=psi_deg > phi_deg)
 
     if np.isfinite(L_t) and theta > 0:
         out["A_ca"], out["X"] = arrest_length(tau_g, theta, Lam, sigma_t, delta, L_t, C)

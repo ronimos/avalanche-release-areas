@@ -7,6 +7,7 @@ Covers:
   TestMeloche2025Calibration — three published calibration runs (Fig8a, Fig8b, JBC)
   TestPrimitiveFunctions     — individual function correctness
   TestJan18Sanity            — aggregate physical-plausibility smoke test on real data
+  TestModeIIISpeedCap        — mode III crack-speed cap (Broberg 1989)
 """
 
 from __future__ import annotations
@@ -21,8 +22,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from release_areas.arrest_indices import (
+    MODE2_SPEED_RATIO,
+    MODE3_SPEED_RATIO,
     R_FIT,
     arrest_length,
+    mode3_length_ratio,
     arrest_length_energy,
     critical_strength,
     dynamic_gradient,
@@ -324,3 +328,56 @@ class TestJan18Sanity:
     def test_all_sustained(self):
         # All filtered rows have slope_angle > 28 > phi=27
         assert all(r['sustained'] is True for r in self.results)
+
+
+class TestModeIIISpeedCap:
+    """Mode III cracks cannot exceed c_s (Broberg 1989); mode II runs
+    supershear at ~1.6 c_s. The slower crack builds slab tension faster per
+    unit advance, so cross-slope first-fracture distance is shorter."""
+
+    def test_speed_ratios(self):
+        assert MODE2_SPEED_RATIO == 1.6
+        assert MODE3_SPEED_RATIO == 1.0
+
+    def test_ratio_value_at_nu_0p3(self):
+        # 1/(1 + 1.0^2*0.35) / (1/(1 + 1.6^2*0.35)) = 1.35/1.896
+        r = mode3_length_ratio(4.0e6, 250.0, nu=0.3)
+        assert math.isclose(r, 1.35 / 1.896, rel_tol=1e-3), r
+
+    def test_ratio_shortens_cross_slope(self):
+        """Cap must shorten, never lengthen, the cross-slope fracture distance."""
+        assert 0.0 < mode3_length_ratio(4.0e6, 250.0, nu=0.3) < 1.0
+
+    def test_ratio_independent_of_E_and_rho(self):
+        """c_s^2/c_p^2 = (1-nu)/2, so E and rho cancel exactly."""
+        vals = [mode3_length_ratio(E, rho, nu=0.3)
+                for E, rho in [(2.0e6, 200.0), (4.0e6, 250.0), (6.0e6, 350.0)]]
+        assert all(math.isclose(v, vals[0], rel_tol=1e-12) for v in vals), vals
+
+    def test_ratio_increases_with_nu(self):
+        """Higher nu -> c_s closer to c_p -> less difference between the modes."""
+        rs = [mode3_length_ratio(4.0e6, 250.0, nu=nu) for nu in (0.2, 0.3, 0.4)]
+        assert rs[0] < rs[1] < rs[2], rs
+
+    def test_equal_speeds_give_unity(self):
+        r = mode3_length_ratio(4.0e6, 250.0, nu=0.3,
+                               speed_ratio_along=1.0, speed_ratio_cross=1.0)
+        assert math.isclose(r, 1.0, rel_tol=1e-12)
+
+    def test_evaluate_emits_directional_lengths(self):
+        out = evaluate(rho=250, h=0.5, psi_deg=35, E=4e6, sigma_t=6e3,
+                       D_wl=0.04, G_wl=0.2e6, theta=30, delta=0)
+        for k in ('k_x_cross', 'L_dyn_cross', 'mode3_length_ratio'):
+            assert k in out, f"{k} missing from evaluate() output"
+        # slower crack -> larger gradient -> shorter tensile length
+        assert out['k_x_cross'] > out['k_x']
+        assert out['L_dyn_cross'] < out['L_dyn']
+        assert math.isclose(out['L_dyn_cross'] / out['L_dyn'],
+                            out['mode3_length_ratio'], rel_tol=1e-9)
+
+    def test_cross_slope_still_below_quasi_static(self):
+        """Any dynamic gradient is below k_f, so L_dyn_cross < L_t."""
+        out = evaluate(rho=250, h=0.5, psi_deg=35, E=4e6, sigma_t=6e3,
+                       D_wl=0.04, G_wl=0.2e6, theta=30, delta=0)
+        assert out['k_x_cross'] < out['k_f']
+        assert out['L_dyn_cross'] > out['L_t']

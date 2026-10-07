@@ -50,6 +50,32 @@ USE_MELOCHE_ARREST = config.USE_MELOCHE_ARREST
 MELOCHE_DELTA      = config.DELTA
 
 
+def mode3_speed_cap_ratio(trigger_cluster_id: int,
+                          meloche_df: pd.DataFrame) -> Optional[float]:
+    """L_dyn,III / L_dyn,II for the trigger, or None if the cap is disabled.
+
+    Prefers the `mode3_length_ratio` column written by
+    compute_meloche_features; falls back to computing it from nu so CSVs
+    predating the column still get the cap. Returns None when
+    config.USE_MODE3_SPEED_CAP is off, which restores pre-cap behaviour.
+    """
+    if not config.USE_MODE3_SPEED_CAP:
+        return None
+
+    if (not meloche_df.empty and 'mode3_length_ratio' in meloche_df.columns
+            and trigger_cluster_id in meloche_df.index):
+        ratio = float(first_scalar(
+            meloche_df.loc[trigger_cluster_id, 'mode3_length_ratio']))
+        if np.isfinite(ratio) and 0.0 < ratio <= 1.0:
+            return ratio
+
+    # E and rho cancel out of the ratio, so any positive pair works here.
+    from release_areas.arrest_indices import mode3_length_ratio
+    return float(mode3_length_ratio(
+        4.0e6, 250.0, config.NU,
+        config.MODE2_SPEED_RATIO, config.MODE3_SPEED_RATIO))
+
+
 def directional_lambda(props: dict, is_cross: bool) -> float:
     """Elastic length Λ to use for propagation in a given direction.
 
@@ -545,13 +571,29 @@ def propagate_crack(
                                       int(round(pxs[i][1])), transform)
                  for i, c in enumerate(cids)}
 
-    d_lat = estimate_cross_slope_width(
-        trigger_cluster_id, A_ca if A_ca else 50.0,
+    A_ca_base = A_ca if A_ca else 50.0
+    d_lat_gaume = estimate_cross_slope_width(
+        trigger_cluster_id, A_ca_base,
         meloche_df, cluster_map, transform,
         snap_features=snap_features, pixel_index=pixel_index) * size_factor
-    d_lat = max(d_lat, 15.0)
 
-    print(f"    d_lat={d_lat:.0f}m")
+    # Mode III crack-speed cap. Mode III cannot exceed c_s where upslope runs
+    # supershear at ~1.6 c_s; the slower crack builds slab tension faster per
+    # unit advance, so first slab fracture — and hence arrest — comes sooner
+    # cross-slope. Composed as a min() with the Gaume width because arrest
+    # happens at whichever constraint binds first.
+    d_lat = d_lat_gaume
+    mode3_ratio = mode3_speed_cap_ratio(trigger_cluster_id, meloche_df)
+    if mode3_ratio is not None:
+        d_lat_speed = A_ca_base * mode3_ratio * size_factor
+        d_lat = min(d_lat, d_lat_speed)
+        print(f"    d_lat={max(d_lat, 15.0):.0f}m  "
+              f"(gaume={d_lat_gaume:.0f}m, mode3_speed_cap={d_lat_speed:.0f}m "
+              f"@ ratio {mode3_ratio:.3f})")
+    else:
+        print(f"    d_lat={max(d_lat, 15.0):.0f}m  (gaume only, "
+              f"mode III speed cap off)")
+    d_lat = max(d_lat, 15.0)
 
     LAMBDA_DROP_FACTOR     = config.LAMBDA_DROP_FACTOR
     LAMBDA_RISE_FACTOR     = config.LAMBDA_RISE_FACTOR

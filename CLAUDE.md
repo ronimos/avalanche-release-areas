@@ -147,6 +147,31 @@ gate is scale-invariant (relative change) and `MIN_PROPAGATION_LAMBDA` = 0.1 m
 is never approached. Only a Λ_III with different *spatial structure* will move
 the flanks. See methods §3.
 
+## Mode III crack-speed cap (implemented)
+
+Mode III cracks cap at `c_s` where mode II runs supershear at ~1.6 `c_s`
+(Broberg 1989). A slower crack builds slab tension faster per unit advance, so
+the cross-slope distance to first slab fracture is shorter:
+`L_dyn,III/L_dyn,II = 0.712` at ν=0.3. E and ρ cancel — the ratio depends only
+on ν and the two speed ratios (`arrest_indices.mode3_length_ratio`).
+
+Unlike Λ_III this is an **absolute distance cap**, so it does change results.
+`propagate_crack` composes it with the Gaume width as a minimum:
+`d_lat = min(gaume_width, A_ca · 0.712) · size_factor`.
+
+Flags: `USE_MODE3_SPEED_CAP` (default True), `MODE2_SPEED_RATIO` = 1.6,
+`MODE3_SPEED_RATIO` = 1.0. Turning it off is bit-for-bit identical to pre-cap.
+
+**Known asymmetry — read before changing this.** Only the *restrictive* half of
+mode III is coded. Because G < E′, an equal-strength slab has a *larger* energy
+cap cross-slope (`slab_energy_cap_cross`, G_slab,III = τ_flank²h/2G), which
+pushes the other way — but it needs a flank strength τ_flank that has no
+parameterisation, so it is absent. On Jan 18 the cap binds on 2 of 5 triggers
+and makes the aggregate fit slightly worse (mean IoU 0.567 → 0.561, area ratio
+0.92 → 0.78). That is consistent with implementing one side of a two-sided
+effect; it is left on because Broberg's limit holds independently of this event.
+Do not tune it against Jan 18. See methods §3.
+
 Lateral *distance* extent is separately set by `estimate_cross_slope_width()`
 (Gaume 2015 / θ ratio, capped at `GAUME_ASPECT_CAP`).
 

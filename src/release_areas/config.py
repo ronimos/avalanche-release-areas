@@ -96,6 +96,20 @@ THICKNESS_RISE_FACTOR = 0.30   # fractional thickening arrest threshold
 # depends on material properties that vary across clusters differently than E′
 # does. Verified: a spatially varying Λ_cross moves every release area.
 USE_MODE3_LAMBDA = False
+
+# ---- Mode III (cross-slope) crack-speed cap ----------------------------
+# Upslope (mode II) cracks run supershear at ~1.6 c_s; mode III (antiplane)
+# cracks cannot exceed c_s (Broberg 1989). Since the dynamic tension gradient
+# is k_x = k_f c_p^2/(c_p^2 + adot^2), a slower crack builds slab tension
+# FASTER per unit advance, so the distance to first slab fracture is shorter
+# cross-slope: L_dyn,III / L_dyn,II = 0.712 at nu = 0.3.
+#
+# Unlike USE_MODE3_LAMBDA this is not scale-invariant — it enters as an
+# absolute distance cap on lateral propagation, so it does change results.
+# The ratio depends only on nu and the two speed ratios (E and rho cancel).
+MODE2_SPEED_RATIO   = 1.6    # adot / c_s upslope, Meloche et al. (2025)
+MODE3_SPEED_RATIO   = 1.0    # adot / c_s cross-slope cap, Broberg (1989)
+USE_MODE3_SPEED_CAP = True   # apply the ratio to the lateral distance cap
 BFS_K_NEIGHBOURS      = 8      # cluster adjacency degree for the flood-fill
 MAX_BFS_CLUSTERS      = 500    # safety cap on region size; see methods §5
 

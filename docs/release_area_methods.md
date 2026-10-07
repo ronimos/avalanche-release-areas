@@ -203,10 +203,74 @@ structure* — i.e. if it depends on material properties that vary across
 clusters differently from E′. Injecting a spatially varying Λ_cross does change
 every release area, which confirms the plumbing is live rather than dead.
 
-Expected differences from upslope, not yet simulated:
+### Mode III crack-speed cap — implemented
 
-- Mode III cracks cannot exceed c_s (Broberg 1989), versus ~1.6 c_s upslope. This caps the energy flux and is a plausible reason cross-slope cracks stop more easily.
-- Because G < E′, an equal-strength slab has a larger energy cap cross-slope. If that holds, cross-slope arrest is driven mainly by the speed cap and weak-layer variability, not slab fracture. This is consistent with the JGR paper attributing lateral arrest to weak-layer heterogeneity.
+Mode III (antiplane) cracks cannot exceed the shear wave speed c_s
+(Broberg 1989), whereas upslope mode II cracks run supershear at ȧ ≈ 1.6 c_s.
+Because the dynamic tension gradient is
+
+k_x = k_f c_p² / (c_p² + ȧ²)
+
+a *slower* crack builds slab tension *faster* per unit advance. The distance to
+first slab fracture is therefore shorter cross-slope:
+
+L_dyn,III / L_dyn,II = k_x,II / k_x,III
+
+Since c_s²/c_p² = (1−ν)/2, both E and ρ cancel and the ratio is a function of ν
+and the two speed ratios alone (`arrest_indices.mode3_length_ratio`):
+
+| ν | 0.2 | 0.3 | 0.4 |
+|---|---|---|---|
+| L_dyn,III / L_dyn,II | 0.692 | **0.712** | 0.735 |
+
+**How it enters the pipeline.** Unlike Λ_III, this is *not* scale-invariant — it
+is an absolute cap on lateral propagation distance, so it does change results.
+`propagate_crack` composes it with the Gaume θ width as a minimum, because
+arrest occurs at whichever constraint binds first:
+
+d_lat = min( gaume_width , A_ca · 0.712 ) · size_factor
+
+Controlled by `config.USE_MODE3_SPEED_CAP` (default on),
+`MODE2_SPEED_RATIO = 1.6` and `MODE3_SPEED_RATIO = 1.0`. Setting the flag off is
+bit-for-bit identical to the pre-cap behaviour.
+
+**Effect on Jan 18** (`--max-clusters 2000`, observed crown 6 934 m²). The cap
+binds on 2 of 5 triggers; the other three were already Gaume-limited below it:
+
+| Trigger | d_lat gaume → used | Area off → on (m²) | IoU off → on |
+|---|---|---|---|
+| 2859 | 60 → 35 m | 7 209 → 5 389 | 0.608 → 0.623 |
+| 5656 | 26 m (unbound) | 4 647 → 4 647 | 0.519 |
+| 2858 | 21 m (unbound) | 4 521 → 4 521 | 0.486 |
+| 348  | 41 m (unbound) | 6 405 → 6 405 | 0.667 |
+| 1068 | 32 → 20 m | 7 672 → 7 221 | 0.556 → 0.511 |
+
+Median area 6 405 → 5 389 m² (ratio 0.92 → 0.78); best IoU unchanged at 0.667;
+mean IoU 0.567 → 0.561.
+
+**So the cap makes the aggregate fit slightly worse on the only validation
+event.** Two readings, and this is not resolved:
+
+1. The cap is right and something else over-arrests. The model already
+   *under*-predicted area (ratio 0.92), so any additional arrest constraint
+   worsens the ratio. The uncalibrated `TAU_G_ABS_FLOOR` (350 Pa) and the
+   Λ/thickness discontinuity heuristics are the obvious suspects.
+2. **Only the restrictive half of mode III physics is implemented.** The speed
+   cap shortens lateral propagation, but because G < E′ an equal-strength slab
+   has a *larger* energy cap cross-slope — G_slab,III = τ_flank² h / (2G)
+   versus σt² h / (2E′) — which pushes the other way. That term needs a slab
+   flank strength τ_flank, for which no parameterisation exists, so it is not
+   coded. Implementing one half of a two-sided effect biases toward
+   over-arrest, and the IoU drop is consistent with exactly that.
+
+Per the no-tuning rule the cap is left on, because it follows from Broberg
+(1989) independently of this event; it is not disabled merely because one
+event's IoU fell. But do not read the drop as evidence the cap is wrong — read
+it as evidence that cross-slope arrest is still incompletely modelled.
+
+If the JGR attribution of lateral arrest to weak-layer heterogeneity is right,
+then neither Λ_III nor the speed cap is the dominant control, and the missing
+ingredient is spatial τp variability on the flanks rather than slab mechanics.
 
 ---
 

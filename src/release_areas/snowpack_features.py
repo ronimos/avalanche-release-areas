@@ -470,6 +470,8 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
             sigma_t=sigma_t, D_wl=D_wl_val, G_wl=G_WL,
             theta=theta, nu=NU, phi_deg=PHI_DEG, delta=DELTA,
             tau_p0=tau_p0_val if not np.isnan(tau_p0_val) else None,
+            speed_ratio_along=config.MODE2_SPEED_RATIO,
+            speed_ratio_cross=config.MODE3_SPEED_RATIO,
         )
 
         tau_g_ai    = ai['tau_g']
@@ -496,6 +498,12 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
             # reads it when config.USE_MODE3_LAMBDA is set.
             'Lambda_cross': ai.get('Lambda_cross', np.nan),
             'L_t':          ai.get('L_t',         np.nan),
+            # Distance to first slab fracture, along-slope (supershear) and
+            # cross-slope (mode III capped at c_s). The ratio is the
+            # crack-speed cap applied to lateral propagation.
+            'L_dyn':        ai.get('L_dyn',       np.nan),
+            'L_dyn_cross':  ai.get('L_dyn_cross', np.nan),
+            'mode3_length_ratio': ai.get('mode3_length_ratio', np.nan),
             'A_ca_brittle': ai.get('A_ca',         np.nan),
             'rc_wl':        row.get('rc_wl',       np.nan),
             'G_slab':       ai.get('G_slab',       np.nan),
