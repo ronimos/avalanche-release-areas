@@ -79,8 +79,27 @@ def dynamic_gradient(k_f, E, rho, nu=0.3, speed_ratio=1.6):
 
 # Crack-speed regimes. Upslope (mode II) cracks run supershear; mode III
 # (antiplane) cracks cannot exceed the shear wave speed.
-MODE2_SPEED_RATIO = 1.6   # adot / c_s upslope, Meloche et al. (2025)
+#
+# On the 1.6: Meloche et al. (2025) write the supershear speed as 1.6 c_s but
+# identify it with c_p -- "A horizontal dashed line is set at 1.6 c_s ~= sqrt(E'/rho),
+# which is the supershear speed (Trottet et al., 2022)" -- and plot "until
+# c_p ~= 1.6 c_s". So 1.6 is their rounding of c_p/c_s = sqrt(2/(1-nu)) = 1.690
+# at nu = 0.3. Taking adot = c_p exactly gives k_x/k_f = 1/2, which is what the
+# paper's own Fig. 3 caption states; the literal 1.6 gives 0.527.
+# We keep the literal 1.6 so published figures reproduce; cp_over_cs() below
+# gives the exact alternative. The choice moves mode3_length_ratio by ~5%
+# (0.712 -> 0.675).
+MODE2_SPEED_RATIO = 1.6   # adot / c_s upslope, Meloche et al. (2025) as written
 MODE3_SPEED_RATIO = 1.0   # adot / c_s cross-slope cap, Broberg (1989)
+
+
+def cp_over_cs(nu=0.3):
+    """c_p / c_s = sqrt(2/(1-nu)); 1.690 at nu=0.3.
+
+    The exact supershear bound that Meloche et al. round to 1.6. Pass as
+    speed_ratio_along to evaluate() for the self-consistent k_x/k_f = 1/2.
+    """
+    return np.sqrt(2.0 / (1.0 - nu))
 
 
 def mode3_length_ratio(E, rho, nu=0.3,

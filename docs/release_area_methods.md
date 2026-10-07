@@ -385,11 +385,41 @@ What actually stops propagation, in evaluation order:
 | Λ discontinuity, drop / rise | `LAMBDA_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
 | Thickness discontinuity, drop / rise | `THICKNESS_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
 
-Two things follow. First, the 350 Pa floor — not the 40 Pa trigger gate — is
-the binding driving-stress criterion inside the region, and it is an
-engineering choice with no calibration behind it. Second, the Λ and thickness
-discontinuity thresholds are heuristics for "the slab stops looking like the
-slab I started in"; they are not from Meloche et al.
+**Measured: which gates actually fire.** Arrest reasons summed over the five
+Jan 18 triggers (1 109 rejections, `--max-clusters 2000`):
+
+| Gate | Share |
+|---|---|
+| `outside_start_zone` | 29.4% |
+| `lateral_distance_cap` | 24.1% |
+| Λ discontinuity (along + cross, drop + rise) | 24.9% |
+| downslope / upslope distance cap | 9.4% |
+| thickness discontinuity | 6.7% |
+| `stauchwall_slope` | 5.5% |
+| **`tau_g_below_floor`** | **0%** |
+| **`thin_slab`** | **0%** |
+| **`low_lambda`** | **0%** |
+
+So all three *absolute* physical floors are inert on this dataset.
+`TAU_G_ABS_FLOOR` = 350 Pa sits at **P0.0** of the start-zone τg distribution
+(minimum 553 Pa, median 1 930 Pa), so it cannot fire; likewise
+`MIN_PROPAGATION_SLAB` = 0.5 m, which the trigger filter chain already
+enforces, and `MIN_PROPAGATION_LAMBDA` = 0.1 m against a minimum Λ of 0.54 m.
+An earlier revision of this section claimed the 350 Pa floor was the binding
+driving-stress criterion; that was wrong.
+
+What actually bounds the region is the start-zone mask, the three distance
+caps, and the Λ/thickness discontinuity heuristics. The latter are heuristics
+for "the slab stops looking like the slab I started in" — they are not from
+Meloche et al., they are uncalibrated, and at ~32% of all rejections they are
+the highest-value calibration target in the model.
+
+A caution on the 350 Pa value: τg = ρ g h sin ψ scales with slab depth, so an
+absolute stress floor does not transfer between paths, dates or snowpacks. It
+was presumably set against a thinner slab than Jan 18's 1.5 m median. If it is
+to be kept it should be expressed relative to the local τg distribution rather
+than in Pa — but see §6 on why the percentile must not be chosen from this
+event.
 
 **Safety cap.** `config.MAX_BFS_CLUSTERS` (default 500) bounds the region size.
 This is not physics. When the cap binds, the run prints a `[CAP-BOUND]`

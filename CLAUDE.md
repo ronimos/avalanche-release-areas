@@ -95,8 +95,17 @@ failing tests pass — fix the underlying formula or inputs.
 - `config.MAX_BFS_CLUSTERS` is a *safety cap*, not physics. When it binds, the
   run prints a `[CAP-BOUND]` warning and the polygon is not a physical result.
 - `config.USE_MELOCHE_ARREST` is **False**: the BFS arrests on Λ/thickness
-  discontinuity heuristics plus `TAU_G_ABS_FLOOR` (350 Pa), not on the Meloche
+  discontinuity heuristics and the distance caps, not on the Meloche
   per-direction A_ca criterion. Enabling it changes every polygon.
+- The three absolute floors — `TAU_G_ABS_FLOOR` (350 Pa),
+  `MIN_PROPAGATION_SLAB` (0.5 m), `MIN_PROPAGATION_LAMBDA` (0.1 m) — are
+  **inert on the Jan 18 data**: measured 0 arrests each. 350 Pa is at P0.0 of
+  start-zone τg (min 553 Pa). Do not spend effort calibrating them; the
+  Λ/thickness discontinuity factors (~32% of rejections) are the real target.
+- **IoU is capped at 0.830 on Jan 18**: 17% of the observed crown (1 180 of
+  6 934 m²) lies outside the start-zone KML, and the BFS hard-rejects clusters
+  outside the mask. 29.4% of all arrests are that mask. Report IoU against
+  this ceiling, not against 1.0.
 
 ## Filter chain in generate_scenarios.py
 

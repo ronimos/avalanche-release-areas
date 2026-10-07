@@ -22,10 +22,13 @@ RASTER_EPSG = 6342
 # -----------------------------------------------------------------------
 # Snowpack / weak-layer material
 # -----------------------------------------------------------------------
-G_WL     = 0.2e6   # weak-layer shear modulus (Pa); Meloche et al. (2025) Table 1
+G_WL     = 0.2e6   # weak-layer shear modulus (Pa); measured by Reiweger et al.
+                   # (2010) in cold-lab shear tests, per Meloche et al. (2025) p.7
 NU       = 0.3     # slab Poisson's ratio
 PHI_DEG  = 27.0    # snow friction angle (degrees)
-DELTA    = 1.0     # Meloche softening coefficient δ; see methods §6 on δ sensitivity
+DELTA    = 1.0     # Meloche softening coefficient δ. Matches the paper's own
+                   # full-slope-scale campaign (Table 1); their Fig. 8 brittle
+                   # runs, which calibrate C and R_FIT, used δ = 0.
 D_WL_FALLBACK = 0.04   # m; weak-layer thickness used only when wl_thickness is NaN
 L_SS     = 20.0    # m; steady-state propagation length, Meloche et al. (2025)
 
@@ -33,8 +36,26 @@ L_SS     = 20.0    # m; steady-state propagation length, Meloche et al. (2025)
 # Feature extraction (compute_meloche_features)
 # -----------------------------------------------------------------------
 K_NEIGHBORS        = 6      # k-nearest cluster centroids used for the θ gradient
-TAU_G_FEATURE_FLOOR = 50.0  # Pa; below this the arrest scaling laws are not evaluated
+TAU_G_FEATURE_FLOOR = 50.0  # Pa; below this the arrest scaling laws are not
+                            # evaluated. UNSUPPORTED: Meloche et al. never varied
+                            # tau_g (h=0.5 m, rho=250, psi=35 fixed in all four
+                            # campaigns, so tau_g = 703 Pa is the only simulated
+                            # value). The paper's size caveat is "size 3 or more",
+                            # not D2+. See THETA_VALID_* for the thresholds the
+                            # paper does give.
 THETA_MIN          = 1e-6   # Pa/m; θ below this is treated as no usable gradient
+
+# Validity range of the arrest scaling laws in θ, from Meloche et al. (2025).
+# These are the only quantitative propagation thresholds the paper gives:
+#   p.12 "Shear strength gradients of more than 20 Pa m-1 were needed to obtain
+#         crack arrest within the PST simulated length."
+#   p.13 runs with θ < 20 Pa/m were REMOVED from their analysis (no arrest).
+#   p.10 "When the shear strength gradient is larger than around 5,000 Pa m-1,
+#         the gradient is too large, causing crack arrest after L_ss."
+# On Jan 18, 36% of start-zone clusters sit below 20 Pa/m, i.e. outside the
+# calibrated regime. Not currently enforced — see methods §5.
+THETA_VALID_MIN = 20.0      # Pa/m
+THETA_VALID_MAX = 5000.0    # Pa/m
 
 # -----------------------------------------------------------------------
 # Trigger selection filter chain (generate_scenarios)
