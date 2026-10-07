@@ -61,9 +61,15 @@ k_x = k_f c_p² / (c_p² + ȧ²), c_p = √(E′/ρ), c_s = √(G/ρ)
 
 L_t = σt / k_f, L_dyn = σt / k_x
 
-**Arrest length, elastic slab (Eq. 19)**, for reference (not coded):
+**Arrest length, elastic slab (Eq. 19)**
 
 A_ca / L_ss ∝ ( τg / (θ Λ √(1+δ)) )^(3/2)
+
+The paper gives no constant of proportionality, so the pipeline emits only the
+dimensionless group `Pi1_elastic` = τg / (θ Λ √(1+δ)) and not an absolute
+elastic arrest length. (An earlier revision wrote an `A_ca_elastic` column as
+`L_ss · Π₁^1.5`, i.e. silently assuming the constant equals 1, which produced
+medians of ~7 800 m. That column has been removed.)
 
 ![JGR Fig. 7: elastic-slab arrest scaling (a) and brittle runs added on top (b)](figures/jgr_fig7_elastic_scaling.png)
 
@@ -177,6 +183,26 @@ The code provides:
 - `elastic_length_cross`: Λ_III = √( G h D_wl / G_wl ), giving Λ_III/Λ_II = √((1−ν)/2) ≈ 0.59 at ν = 0.3. This is my derivation, using the slab shear modulus for antiplane loading.
 - `slab_energy_cap_cross`: G_slab,III = τ_flank² h / (2G), where τ_flank is a slab flank (shear) strength. No parameterization exists, so it is a user input.
 
+**Pipeline status.** The propagation code splits arrest evaluation into
+along-slope and cross-slope branches (`release_geometry.directional_lambda`),
+but the cross-slope branch currently resolves to the mode II Λ, gated behind
+`config.USE_MODE3_LAMBDA = False`, pending Gaume's antiplane formula. The split
+was verified to be a bit-for-bit no-op on the Jan 18 results.
+
+**A constant Λ_III/Λ_II ratio cannot change the BFS result.** This is worth
+knowing before the formula arrives. The Λ continuity gate tests the *relative*
+change (Λ_nbr − Λ_cur)/Λ_cur, which is invariant under any uniform rescaling of
+Λ; and the only absolute Λ threshold, `MIN_PROPAGATION_LAMBDA` = 0.1 m, is never
+approached (min Λ_II = 0.54 m on Jan 18, so min Λ_III = 0.32 m). Since the
+current derivation gives Λ_III/Λ_II = √((1−ν)/2), a constant for constant ν,
+switching to it provably changes nothing. Confirmed by running both flag
+states: identical areas and IoU.
+
+A real Λ_III will only move the flanks if it carries different *spatial
+structure* — i.e. if it depends on material properties that vary across
+clusters differently from E′. Injecting a spatially varying Λ_cross does change
+every release area, which confirms the plumbing is live rather than dead.
+
 Expected differences from upslope, not yet simulated:
 
 - Mode III cracks cannot exceed c_s (Broberg 1989), versus ~1.6 c_s upslope. This caps the energy flux and is a plausible reason cross-slope cracks stop more easily.
@@ -189,14 +215,27 @@ Expected differences from upslope, not yet simulated:
 | Input | Source | Note |
 |---|---|---|
 | ρ, h | layer-weighted slab density and thickness above weak layer | check slope-normal vs vertical |
-| E | density parameterization | not a default output |
-| σt | density parameterization (e.g. Sigrist 2006) | formula not included here |
+| E | density parameterization | `profile_features`: E = (ρ/300)^2.5 · 4 MPa |
+| σt | density parameterization | `profile_features`: σt = (ρ/300)^1.4 · 5 kPa |
 | τp0 | shear strength output (`.pro` code 0508, to verify) | In `compute_meloche_features()`, each cluster's own `wl_shear_strength` is used as τp0 — a per-cluster index: "if crack initiates here, how far must WL strength rise to arrest it?" |
 | G_wl, D_wl | weak-layer modulus and thickness | paper used 0.2 MPa, 0.04 m |
-| θ | `shear_gradient` on τp along an upslope transect | needs a spatial field, not one profile |
+| θ | k-nearest-neighbour gradient of τp between cluster centroids (§5) | needs a spatial field, not one profile. `arrest_indices.shear_gradient` (transect polyfit) is a separate helper the pipeline does not use |
 | δ | not observable | paper range 0–2 |
 
 Without θ, the energy framework still gives τp* and R0 = G_c(τp0)/G_slab, a per-profile index of how far weak-layer strength must rise before a crack stops.
+
+**Caveat on E and σt.** Both density parameterisations are hardcoded in
+`profile_features`. Provenance, recovered from the upstream avachain source:
+E is a power-law **hand-fit to the range** reported by van Herwijnen et al.
+(2016) — ~2 MPa at ρ = 200, ~4 MPa at 300, ~6 MPa at 350 kg m⁻³ — and σt
+anchors on ~5 kPa at ρ = 300, inside the Meloche 2–10 kPa range.
+
+Neither is a published regression: the exponents (2.5, 1.4) were chosen to pass
+through those anchor points, so they carry no fitted uncertainty and have not
+been validated outside 200–350 kg m⁻³. Jan 18 slab densities (264–332 kg m⁻³,
+§6) sit inside that window, but Λ ∝ √E and G_slab ∝ σt²/E, so both frameworks
+inherit this choice directly. Replacing these with a cited regression is the
+single highest-value improvement to the input chain.
 
 ### Building the feature CSVs from xsnow
 
@@ -225,12 +264,29 @@ The start zone is partitioned into spatial clusters via a pre-computed raster (`
 
 - **Slab**: density-weighted mean density (ρ), slope-normal thickness (h), Young's modulus E and tensile strength σt from density parameterisations, and dominant grain class.
 - **WL**: mean shear strength (τp), grain size, burial depth, and thickness (D_wl).
-- **Interface stability indices**: Sk38, SSI, SN38, and critical cut length r_c from layers within 5 cm of the WL top.
-- **Derived elastic quantities**: K_wl = G_wl / D_wl, Λ (upslope elastic length), and slab energy cap G_slab.
+- **Interface stability indices**: Sk38, SSI, SN38 and the deformation-rate index as the minimum over layers within 5 cm of the WL top. Critical cut length r_c is the mean over the **whole** weak layer, not the 5 cm band.
+- **Derived elastic quantities**: K_wl = G_wl / D_wl and Λ (upslope elastic length). G_slab is *not* computed here — it comes from `arrest_indices.evaluate()` via `compute_meloche_features`.
+
+Profiles whose weak layer is buried shallower than `min_depth_cm` (10 cm in the
+worked example) are returned without slab/WL features. On the Jan 18 data this
+affects 2 of 3 542 clusters, all of which the 0.5 m slab-thickness filter
+removes anyway.
 
 ### Spatial shear gradient θ (`compute_meloche_features`)
 
-θ = ∂τp/∂x is approximated from k-nearest spatial neighbours (k = 6). For each cluster centroid, the k closest centroids are located via a ball-tree on pixel-grid coordinates. θ is the mean of |τp_i − τp_j| / d_ij across those pairs (absolute value; the gradient enters all arrest-length formulae squared or via |θ| implicitly). Clusters with no valid neighbours or θ < 10⁻⁶ Pa m⁻¹ are excluded from arrest-index output.
+θ = ∂τp/∂x is approximated from k-nearest spatial neighbours (k = 6, `config.K_NEIGHBORS`). For each cluster centroid, the k closest centroids are located via a ball-tree on pixel-grid coordinates; the resulting pixel separations are multiplied by the raster pixel size so θ is in **Pa m⁻¹**. θ is the mean of |τp_i − τp_j| / d_ij across those pairs (absolute value; the gradient enters all arrest-length formulae squared or via |θ| implicitly).
+
+Two guards apply before the arrest indices are evaluated, both undocumented in
+earlier revisions:
+
+- τg < `config.TAU_G_FEATURE_FLOOR` (50 Pa) → row emitted with `tau_g` and
+  `slope_angle` only. Note this sits *above* the 40 Pa trigger filter below,
+  so clusters between 40 and 50 Pa can never supply arrest indices.
+- θ NaN or < `config.THETA_MIN` (10⁻⁶ Pa m⁻¹) → row emitted with `tau_g`,
+  `theta` and `slope_angle` only.
+
+Such clusters are *not dropped from the frame*; they appear as rows whose
+arrest-index columns are NaN.
 
 ### Trigger cluster selection (`generate_scenarios`)
 
@@ -239,11 +295,48 @@ Candidate trigger locations are selected by a four-stage filter applied to all s
 | Stage | Criterion | Rationale |
 |---|---|---|
 | 1 | τg ≥ 40 Pa; slope ≥ (stauchwall_deg + 2°); Sk38 < 1.0 | Minimum gravitational driving stress, terrain steep enough to sustain crack propagation, and unstable stability index |
-| 2 | 0.5 m ≤ h ≤ max_slab_thickness (default 2.0 m; 1.5 m for skier scenarios) | Exclude implausibly thin or anomalously thick slab columns |
+| 2 | 0.5 m ≤ h ≤ max_slab_thickness (default 2.0 m; 1.5 m for skier scenarios), **or h is NaN** | Exclude implausibly thin or anomalously thick slab columns. Clusters with no measured slab thickness are *kept*, not rejected |
 | 3 | Elevation ≥ P50 of remaining candidates | Prefer upper start-zone cells — lower cells may be in runout or deposition |
 | 4 | Π₁ ≥ median of candidates (propagation gate) | Π₁ = τg / (θ Λ √(1+δ)); retain clusters where the dimensionless driving ratio exceeds the group median, i.e., where propagation is relatively more likely |
 
-Survivors are ranked by Sk38 ascending (most unstable first). The top N (default 5, `config.N_TOP_TRIGGERS`) are passed to the BFS release-polygon builder. Each trigger yields one or more release polygons depending on the `--size-factors` and `--depth-pcts` sweep.
+Survivors are ranked by Sk38 ascending (most unstable first). The top N (default 5, `config.N_TOP_TRIGGERS`) are passed to the BFS release-polygon builder. Each trigger yields one release polygon per `--size-factors` entry (default a single polygon at size_factor 1.0).
+
+### What the BFS actually arrests on (`propagate_crack`)
+
+This is the part most likely to be misread from the module names. The
+flood-fill does **not** apply the Meloche A_ca criterion per direction. That
+test exists but is gated behind `config.USE_MELOCHE_ARREST`, which is `False`.
+What actually stops propagation, in evaluation order:
+
+| Gate | Constant | Value |
+|---|---|---|
+| Outside the start-zone mask | — | hard boundary |
+| Upslope distance | A_ca × size_factor | per trigger |
+| Downslope distance | trigger → stauchwall distance | per trigger |
+| Lateral distance | `estimate_cross_slope_width` (Gaume θ ratio), floor 15 m | per trigger |
+| Slope below stauchwall (non-upslope only) | `STAUCHWALL_DEG` | 28° |
+| Absolute driving-stress floor | `TAU_G_ABS_FLOOR` | **350 Pa** |
+| Thin slab | `MIN_PROPAGATION_SLAB` | 0.50 m |
+| Compliant slab | `MIN_PROPAGATION_LAMBDA` | 0.1 m |
+| Λ discontinuity, drop / rise | `LAMBDA_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
+| Thickness discontinuity, drop / rise | `THICKNESS_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
+
+Two things follow. First, the 350 Pa floor — not the 40 Pa trigger gate — is
+the binding driving-stress criterion inside the region, and it is an
+engineering choice with no calibration behind it. Second, the Λ and thickness
+discontinuity thresholds are heuristics for "the slab stops looking like the
+slab I started in"; they are not from Meloche et al.
+
+**Safety cap.** `config.MAX_BFS_CLUSTERS` (default 500) bounds the region size.
+This is not physics. When the cap binds, the run prints a `[CAP-BOUND]`
+warning and the polygon is an artefact of the cap. On Jan 18, 3 of 5 triggers
+are cap-bound at the default; the region sizes saturate by about 1 000
+clusters, so any `--max-clusters` ≥ 1000 gives the same answer — raising it is
+not tuning to the event.
+
+**Mode III.** No cross-slope (mode III) arrest multiplier is applied. Lateral
+extent comes only from `estimate_cross_slope_width`, which scales A_ca by
+θ_downslope / θ_crossslope capped at `GAUME_ASPECT_CAP` = 2.5.
 
 ---
 
@@ -252,7 +345,7 @@ Survivors are ranked by Sk38 ascending (most unstable first). The top N (default
 ### Input ranges from SNOWPACK
 
 Jan 18 clusters are deeper-hoar (DH / FC) weak layer under a hard slab, NE-facing at ~3700 m.
-All quantities from `release_zone_features_2026-01-18.csv` (n = 288 release, 1032 adjacent).
+All quantities from a release/adjacent split of `all_start_zone_features_2026-01-18.csv` (n = 288 release, 1032 adjacent); the split script is no longer in the repo.
 
 | Parameter | JGR calibration | Release (median [min, max]) | Adjacent (median [min, max]) |
 |---|---|---|---|
@@ -311,34 +404,71 @@ Eq. 20 outperforms the energy cap on this event: IoU 0.353 vs 0.240–0.256. R0 
 
 R0 is the cleanest single-number discriminant that does not require θ. A cluster with R0 < R_FIT (0.48) means the WL at that point cannot absorb the slab energy — crack propagates. The Jan 18 release zone has median R0 = 0.4 (below threshold) while adjacent = 0.5 (above threshold), consistent with the observed release boundary.
 
+**Caveat on comparing R0 to R_FIT.** R_FIT = 0.48 was fitted at the *arrest*
+point, where τp has risen to τp*; R0 evaluates the same ratio at the *trigger*
+point, where τp = τp0. Running the two Fig. 8 calibration cases through
+`evaluate()` gives R0 = 0.049 — an order of magnitude below 0.48. So the fact
+that Jan 18 R0 values straddle 0.48 is numerically a coincidence of this
+dataset's τp0/σt ratio, not a validated threshold. The *ordering*
+(release < adjacent < reference) is the defensible result; the absolute
+comparison against R_FIT is not.
+
 ### BFS scenario pipeline results
 
-The BFS crack-propagation pipeline (`generate_scenarios.py`) selects top-5 trigger clusters by lowest Sk38 and builds a release polygon for each via flood-fill with per-direction arrest criteria. Observed crown polygon: `data/little_prof/boundaries/avalanche_release_area_20260118.geojson` (4 550 m²).
+The BFS crack-propagation pipeline (`generate_scenarios.py`) selects top-5 trigger clusters by lowest Sk38 and builds a release polygon for each via flood-fill with the gates tabulated in §5. Observed crown polygon: `data/little_prof/boundaries/avalanche_release_area_20260118.geojson` (**6 934 m²**, reprojected from the CRS84 source mapping `20260118_avalanche_boundaries.geojson`).
 
-Filter chain output (Jan 18 2026):
-- Start-zone clusters with features: 1608
-- After τg ≥ 40 Pa / slope ≥ 30° / Sk38 < 1.0: 493 → 408 → 204
-- After slab thickness 0.5–2.0 m: 102
-- After elevation ≥ P50: 102 → top candidates
-- After Π₁ ≥ median: 102 → 51 final
+The earlier 4 550 m² crown was an older mapping of the same feature (IoU 0.638
+against the current one); all numbers below use the 6 934 m² polygon.
 
-Top-5 scenarios — size_factor = 1.0, depth_percentile = 50:
+Filter chain output (Jan 18 2026), one count per stage:
 
-| Scenario | Trigger cid | Sk38 | A_ca (m) | Release area (m²) | IoU vs observed |
+| Stage | Surviving clusters |
+|---|---|
+| Start-zone clusters with features | 1608 |
+| τg ≥ 40 Pa, slope ≥ 30°, Sk38 < 1.0 | 493 |
+| Slab thickness 0.5–2.0 m | 408 |
+| Elevation ≥ P50 (3656 m) | 204 |
+| Π₁ ≥ median (31.30) | 102 |
+
+(An earlier revision of this table attributed 493 → 408 → 204 all to the first
+filter and reported 51 final candidates; both were wrong.)
+
+Top-5 scenarios at size_factor = 1.0, with the default safety cap
+(`--max-clusters 500`). Depth is the mean `slab_thickness` inside the polygon;
+volume is the integral of that depth over the release area.
+
+| Scenario | Trigger cid | Sk38 | A_ca (m) | Area (m²) | Depth (m) | Volume (m³) | IoU | Cap-bound |
+|---|---|---|---|---|---|---|---|---|
+| scenario_001 | 2859 | 0.72 | 49 | 5 611 | 1.44 | 6 718 | 0.525 | yes |
+| scenario_002 | 5656 | 0.72 | 43 | 4 647 | 1.64 | 4 133 | 0.519 | no |
+| scenario_003 | 2858 | 0.74 | 32 | 4 521 | 1.65 | 3 990 | 0.486 | no |
+| scenario_004 | 348  | 0.75 | 62 | 5 366 | 1.55 | 6 104 | **0.639** ← best | yes |
+| scenario_005 | 1068 | 0.75 | 28 | 5 581 | 1.55 | 6 788 | 0.557 | yes |
+
+**Summary:** observed 6 934 m² · modelled P50 5 366 m² · ratio 0.77 · best IoU 0.639.
+
+Because 3 of the 5 polygons are cap-bound, these are not purely physical
+results. Letting the arrest criteria terminate the flood-fill
+(`--max-clusters 2000`; identical for any value ≥ 1000) gives:
+
+| Scenario | Trigger cid | Area (m²) | Depth (m) | Volume (m³) | IoU |
 |---|---|---|---|---|---|
-| scenario_001 | 2859 | 0.72 | 49 | 5 404 | **0.653** |
-| scenario_002 | 5656 | 0.72 | 43 | 5 219 | 0.578 |
-| scenario_003 | 2858 | 0.74 | 32 | 4 805 | 0.493 |
-| scenario_004 | 348  | 0.75 | 62 | 5 812 | 0.647 |
-| scenario_005 | 1068 | 0.75 | 28 | 5 329 | **0.660** ← best |
+| scenario_001 | 2859 | 7 209 | 1.46 | 7 444 | 0.608 |
+| scenario_002 | 5656 | 4 647 | 1.64 | 4 133 | 0.519 |
+| scenario_003 | 2858 | 4 521 | 1.65 | 3 990 | 0.486 |
+| scenario_004 | 348  | 6 405 | 1.57 | 6 742 | **0.667** ← best |
+| scenario_005 | 1068 | 7 672 | 1.52 | 8 434 | 0.556 |
 
-**Summary:** observed 4 550 m² · modelled P50 5 329 m² · ratio 1.17 · best IoU 0.660 (scenario_005, cid=1068).
+**Summary:** observed 6 934 m² · modelled P50 6 405 m² · ratio 0.92 · best IoU 0.667.
 
-All five scenarios overlap the observed crown well (IoU > 0.49). The spread in release area (4 800–5 800 m²) reflects variation in trigger location rather than slab properties, since all five use size_factor = 1.0.
+Uncapped, the model slightly under-predicts area (ratio 0.92) and all five
+polygons overlap the observed crown (IoU 0.49–0.67). The spread in area
+(4 500–7 700 m²) reflects trigger location, since all five use
+size_factor = 1.0.
 
-![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown (4 550 m²). Coloured outlines: five modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
+![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown. Coloured outlines: five modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
 
-*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:32613). Start zone boundary in green. All five modelled polygons overlap the observed crown substantially; best IoU = 0.660 (T5, cid=1068, Sk38=0.75).*
+*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Figure predates the crown update and the cap fix — regenerate with the command below.*
 
 To reproduce:
 
@@ -353,17 +483,22 @@ python -m release_areas.generate_scenarios \
     --out-dir       outputs/little_prof
 ```
 
+Add `--max-clusters 2000` to let the arrest criteria, rather than the safety cap, bound the regions.
+
 Output: `outputs/little_prof/release_comparison.png` — modelled release polygons overlaid on DEM hillshade with per-trigger IoU. Any `avalanche_release_area_*.geojson` file added to `data/little_prof/boundaries/` is automatically loaded and shown on the plot in a distinct colour.
 
 ### IoU evaluation
 
-The IoU figures in §5.2 came from a threshold sweep: for each metric (R0, A_ca_brittle, A_ca_energy δ=0/δ=1), clusters below a percentile threshold were classified as "predicted release", rasterized using `cluster_map.tif`, and IoU/recall/precision were computed against `data/little_prof/boundaries/avalanche_release_area_20260118.geojson`. That sweep script is no longer in the repo.
+The IoU figures in the framework-comparison table came from a threshold sweep: for each metric (R0, A_ca_brittle, A_ca_energy δ=0/δ=1), clusters below a percentile threshold were classified as "predicted release", rasterized using `cluster_map.tif`, and IoU/recall/precision were computed against `data/little_prof/boundaries/avalanche_release_area_20260118.geojson`. That sweep script is no longer in the repo.
 
-The BFS pipeline IoU (§5.4) is a polygon-level IoU: the modelled GeoJSON polygon is intersected directly with the observed crown polygon, no rasterization.
+The BFS pipeline IoU is a polygon-level IoU: the modelled GeoJSON polygon is intersected directly with the observed crown polygon, no rasterization.
 
 ### Hardcoded parameter sensitivity
 
-- **δ**: The dominant sensitivity. Use δ = 0 as the default for DH weak layers. The code exposes this via `DELTA` in `compute_meloche_features()`.
+- **δ**: The dominant sensitivity. For DH weak layers δ = 0 is better-supported, but `config.DELTA` **ships as 1.0** and `compute_meloche_features` reads it from there. Changing the default is a one-line edit in `config.py`; it is not a function argument, and the two values are not reconciled anywhere in this repo.
+- **`MAX_BFS_CLUSTERS` (500)**: a safety cap, not physics. Binding on 3 of 5 Jan 18 triggers at the default and worth ~20% in area and ~0.03 in IoU. Region size saturates by ~1 000 clusters.
+- **`TAU_G_ABS_FLOOR` (350 Pa)**: the binding driving-stress gate inside the BFS. Uncalibrated.
+- **Λ / thickness discontinuity factors (0.20 / 0.30)**: uncalibrated heuristics; the only lateral/upslope continuity control once the distance caps are satisfied.
 - **D_wl fallback (0.04 m)**: Only used when `wl_thickness` is NaN. Most clusters have measured values (0.022–0.154 m range). The fallback underestimates K_wl by 2×, inflating τp*.
 - **G_WL (0.2 MPa)**: Not independently measured. Changing it scales K_wl and τp* proportionally. Untestable from SNOWPACK alone.
 - **C (0.045)**: Two-run fit from JGR Fig. 8. Jan 18 slope is NE-facing vs. the 35° modeled slope; no re-calibration done or recommended.
@@ -393,3 +528,4 @@ The BFS pipeline IoU (§5.4) is a polygon-level IoU: the modelled GeoJSON polygo
 - Meloche, F., et al. (2026). TARP final technical report: Vertical avalanche defense structures.
 - McClung, D. M., & Schweizer, J. (2006). Fracture toughness of dry snow slab avalanches from field measurements. *JGR Earth Surface*. https://doi.org/10.1029/2005JF000403
 - Broberg, K. B. (1989). The near-tip field at high crack velocities. In *Structural Integrity*, Springer.
+- van Herwijnen, A., Gaume, J., Bair, E. H., Reuter, B., Birkeland, K. W., & Schweizer, J. (2016). Estimating the effective elastic modulus and specific fracture energy of snowpack layers from field experiments. *Journal of Glaciology*, 62(236), 997–1007.

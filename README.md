@@ -21,9 +21,10 @@ No zarr, no SNOWPACK, no NWP — just CSVs + rasters.
 |------|-------------|
 | `features/all_start_zone_features_2026-01-18.csv` | Per-cluster WL/slab features at Jan 18, 2026 |
 | `features/meloche_features_all_2026-01-18.csv` | Meloche Π₁, A_ca, θ per cluster |
-| `spatial/cluster_map.tif` | Cluster ID raster (1 m resolution, UTM zone 13N) |
-| `dem_1m.tif` | 1 m DEM (UTM zone 13N) |
-| `boundaries/avalanche_release_area_20260118.geojson` | Observed release polygon, Jan 18 2026 |
+| `spatial/cluster_map.tif` | Cluster ID raster (1 m, EPSG:6342 — NAD83(2011) / UTM 13N) |
+| `dem_1m.tif` | 1 m DEM (EPSG:6342 + NAVD88 height) |
+| `boundaries/avalanche_release_area_20260118.geojson` | Observed release polygon, Jan 18 2026 (EPSG:6342, 6 934 m²) |
+| `boundaries/20260118_avalanche_boundaries.geojson` | Source mapping in CRS84, before reprojection |
 | `boundaries/start_zone.kml` | Start zone KML boundary |
 | `boundaries/domain.kml` | Full simulation domain |
 
@@ -55,8 +56,9 @@ Outputs written to `--out-dir`:
 
 | File | Description |
 |------|-------------|
-| `scenarios/scenario_001/release.geojson` | Release polygon for trigger 1 (GeoJSON, UTM 13N) |
-| `scenarios/scenario_001/params.json` | Trigger cluster ID, Π₁, τ_g, arrest distances |
+| `scenarios/scenario_001/release.geojson` | Release polygon for trigger 1 (GeoJSON, EPSG:6342) |
+| `scenarios/scenario_001/params.json` | Trigger cluster, A_ca, release area, mean depth, volume, density, Voellmy μ/ξ |
+| `scenarios/scenario_001/depth.tif` | Release depth (m) from slab thickness, NaN outside the polygon |
 | `scenario_summary.csv` | One row per scenario — area, IoU, trigger cluster |
 | `release_comparison.png` | Map overlay: modelled vs observed release |
 
@@ -108,17 +110,18 @@ See [`docs/release_area_methods.md`](docs/release_area_methods.md) for full deri
 Crack-arrest scaling law (Meloche et al. 2025, JGR Earth Surface):
 
 ```
-Π₁ = τ_g / (θ · Λ · √(1+δ))
-A_ca = L_t · Π₁ · √(σ_t / τ_g)
+Π₁   = τ_g / (θ · Λ · √(1+δ))
+A_ca = C · L_t · Π₁ · √(σ_t / τ_g)
 ```
 
 Where:
 - τ_g = ρ g h sin ψ — gravitational driving shear stress on WL
-- θ = |∇τ_p| — WL shear-strength spatial gradient (Pa/m)
+- θ = |∇τ_p| — WL shear-strength spatial gradient (Pa/m), from k=6 nearest cluster centroids
 - Λ = √(E′h/K_wl) — elastic length of the slab-WL system (m)
 - δ = 1.0 — softening coefficient (Meloche Table 1)
 - L_t = σ_t / k_f — tensile length (distance to first slab fracture, m)
 - σ_t — slab tensile strength (Pa)
+- C = 0.045 — two-run fit to Meloche et al. (2025) Fig. 8; **do not omit**, it sets the scale of A_ca
 
 ## Reference
 

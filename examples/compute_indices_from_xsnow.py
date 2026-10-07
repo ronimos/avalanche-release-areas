@@ -135,7 +135,7 @@ with rasterio.open(DEM_PATH) as src:
 #   Pi2_brittle   — Π₂ = Π₁ √(σ_t/τ_g)
 #   Lambda        — upslope elastic length (m)
 #   L_t           — quasi-static tensile length (m)
-#   A_ca_elastic  — elastic-slab arrest length (m)
+#   tau_p         — WL shear strength carried through from profile_features (Pa)
 #   A_ca_brittle  — brittle-slab arrest length from Eq. 20, C=0.045 (m)
 #   G_slab        — slab energy cap (J/m²)
 #   tau_p_star    — critical WL strength for energy-cap arrest (Pa)
