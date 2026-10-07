@@ -25,25 +25,61 @@ Downslope: Perzl (2007) JRC; Swiss ALIP/PRA; Maggioni & Gruber;
            Bühler et al.; Veitinger et al. (2016)
 Flanks:    Gaume et al. (2015) The Cryosphere, doi:10.5194/tc-9-795-2015
            + Meloche (2025) cross-slope θ gradient
+
+Mode III (cross-slope) arrest is NOT applied here. arrest_indices provides
+elastic_length_cross and slab_energy_cap_cross, but no mode III multiplier is
+used pending Johan Gaume's antiplane formula — see CLAUDE.md "Mode III TODO".
 """
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-# Default physical parameters
-STAUCHWALL_DEG   = 28.0   # slope threshold for downslope arrest (degrees)
-FRICTION_DEG     = 27.0   # snow friction angle (degrees), Meloche Table 1
-GAUME_ASPECT_CAP = 2.5    # max width/A_ca ratio (prevents runaway cross-slope)
-MIN_POLYGON_AREA = 200.0  # m² — discard degenerate polygons smaller than this
+from release_areas import config
 
-USE_MELOCHE_ARREST = False
-MELOCHE_DELTA      = 1.0   # softening coefficient δ (Meloche default; their Table 1)
+# Re-exported for backwards compatibility; config is the source of truth.
+STAUCHWALL_DEG     = config.STAUCHWALL_DEG
+FRICTION_DEG       = config.PHI_DEG
+GAUME_ASPECT_CAP   = config.GAUME_ASPECT_CAP
+MIN_POLYGON_AREA   = config.MIN_POLYGON_AREA
+USE_MELOCHE_ARREST = config.USE_MELOCHE_ARREST
+MELOCHE_DELTA      = config.DELTA
+
+
+def directional_lambda(props: dict, is_cross: bool) -> float:
+    """Elastic length Λ to use for propagation in a given direction.
+
+    Along-slope (mode II) always uses `Lambda`. Cross-slope (mode III) uses
+    `Lambda_cross` only when `config.USE_MODE3_LAMBDA` is set; otherwise it
+    falls back to the mode II value, which is the current default because
+    Gaume's antiplane formula is not published yet.
+
+    This is the ONLY place the two directions diverge. When Λ_III lands,
+    update `arrest_indices.elastic_length_cross()` and set USE_MODE3_LAMBDA —
+    no other change should be needed.
+    """
+    if is_cross and config.USE_MODE3_LAMBDA:
+        lam = props.get('Lambda_cross', np.nan)
+        if not np.isnan(lam):
+            return lam
+    return props.get('Lambda', np.nan)
+
+
+def first_scalar(value):
+    """Unwrap a pandas lookup that returned a Series/DataFrame to one scalar.
+
+    Cluster ids are not guaranteed unique across concatenated feature frames,
+    so .loc[cid, col] can yield a Series rather than a scalar.
+    """
+    if isinstance(value, pd.DataFrame):
+        return value.iloc[0, 0]
+    if isinstance(value, pd.Series):
+        return value.iloc[0]
+    return value
 
 
 # -----------------------------------------------------------------------
@@ -102,6 +138,33 @@ def utm_to_pixel(x: float, y: float, transform) -> tuple[int, int]:
     return row, col
 
 
+def cluster_pixel_index(cluster_map: np.ndarray) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    """Map every positive cluster id to its (rows, cols) pixel arrays.
+
+    Built in a single sort instead of one full-raster scan per cluster, which
+    is what made the per-cluster `np.argwhere(cluster_map == cid)` calls the
+    dominant cost of polygon generation.
+    """
+    flat    = cluster_map.ravel()
+    valid   = np.flatnonzero(flat > 0)
+    if len(valid) == 0:
+        return {}
+    ids     = flat[valid].astype(np.int64)
+    order   = np.argsort(ids, kind='stable')
+    ids     = ids[order]
+    linear  = valid[order]
+    splits  = np.flatnonzero(np.diff(ids)) + 1
+    ncols   = cluster_map.shape[1]
+    return {int(ids[seg[0]]): (linear[seg] // ncols, linear[seg] % ncols)
+            for seg in np.split(np.arange(len(ids)), splits) if len(seg)}
+
+
+def cluster_centroids_px(pixel_index: dict) -> dict[int, tuple[float, float]]:
+    """Per-cluster centroid in pixel (row, col) coordinates."""
+    return {cid: (float(rows.mean()), float(cols.mean()))
+            for cid, (rows, cols) in pixel_index.items()}
+
+
 # -----------------------------------------------------------------------
 # Downslope: stauchwall location
 # -----------------------------------------------------------------------
@@ -110,7 +173,6 @@ def find_stauchwall(trigger_row: int,
                     trigger_col: int,
                     slope_grid: np.ndarray,
                     aspect_grid: np.ndarray,
-                    transform,
                     threshold_deg: float = STAUCHWALL_DEG,
                     max_steps: int = 500
                     ) -> tuple[int, int]:
@@ -139,15 +201,41 @@ def find_stauchwall(trigger_row: int,
 # Cross-slope: Gaume (2015) + θ
 # -----------------------------------------------------------------------
 
+def _tau_p_lookup(meloche_df: pd.DataFrame,
+                  snap_features: Optional[pd.DataFrame]) -> tuple:
+    """Pick the frame/column holding weak-layer shear strength τp.
+
+    compute_meloche_features() does not carry τp through to its output, so the
+    value normally lives in the profile_features frame. Checking meloche_df
+    first keeps hand-assembled frames that do carry it working.
+    """
+    for frame in (meloche_df, snap_features):
+        if frame is None or frame.empty:
+            continue
+        for col in ('tau_p', 'wl_shear_strength'):
+            if col in frame.columns:
+                return frame, col
+    return None, None
+
+
 def estimate_cross_slope_width(
         trigger_cluster_id: int,
         A_ca: float,
         meloche_df: pd.DataFrame,
         cluster_map: np.ndarray,
         transform,
+        snap_features: Optional[pd.DataFrame] = None,
+        pixel_index: Optional[dict] = None,
         n_lateral_neighbors: int = 6,
         gaume_aspect_cap: float = GAUME_ASPECT_CAP) -> float:
-    """Estimate cross-slope release width (m) using Gaume et al. (2015) / θ."""
+    """Estimate cross-slope release width (m) using Gaume et al. (2015) / θ.
+
+    Falls back to A_ca whenever θ or τp is unavailable.
+
+    This sets the lateral *distance cap*; the cross-slope Λ continuity test
+    lives in propagate_crack via directional_lambda(). Both are mode III
+    concerns and should be revisited together when Λ_III lands.
+    """
     if meloche_df.empty or 'theta' not in meloche_df.columns:
         return A_ca
 
@@ -156,57 +244,50 @@ def estimate_cross_slope_width(
     except (KeyError, TypeError):
         return A_ca
 
-    if np.isnan(theta_down) or theta_down < 1e-6:
+    if np.isnan(theta_down) or theta_down < config.THETA_MIN:
         return A_ca
 
-    trig_pixels = np.argwhere(cluster_map == trigger_cluster_id)
-    if len(trig_pixels) == 0:
+    tau_frame, tau_col = _tau_p_lookup(meloche_df, snap_features)
+    if tau_frame is None or trigger_cluster_id not in tau_frame.index:
         return A_ca
-    t_row, t_col = trig_pixels.mean(axis=0)
-
-    cids_all = np.unique(cluster_map[cluster_map > 0])
-    lateral  = []
-    for cid in cids_all:
-        if cid == trigger_cluster_id:
-            continue
-        pxs = np.argwhere(cluster_map == cid)
-        if len(pxs) == 0:
-            continue
-        c_row, c_col = pxs.mean(axis=0)
-        if abs(c_row - t_row) < 50 and abs(c_col - t_col) > 5:
-            lateral.append((cid, abs(c_col - t_col)))
-
-    lateral.sort(key=lambda x: x[1])
-    lateral = lateral[:n_lateral_neighbors]
-
-    if not lateral:
-        return A_ca
-
-    if 'tau_p' in meloche_df.columns:
-        raw = meloche_df.loc[trigger_cluster_id, 'tau_p']
-    elif 'wl_shear_strength' in meloche_df.columns:
-        raw = meloche_df.loc[trigger_cluster_id, 'wl_shear_strength']
-    else:
-        raw = np.nan
-    tau_trigger = float(pd.to_numeric(raw, errors='coerce'))
+    tau_trigger = float(pd.to_numeric(
+        first_scalar(tau_frame.loc[trigger_cluster_id, tau_col]), errors='coerce'))
     if np.isnan(tau_trigger):
         return A_ca
 
+    if pixel_index is None:
+        pixel_index = cluster_pixel_index(cluster_map)
+    centroids = cluster_centroids_px(pixel_index)
+    if trigger_cluster_id not in centroids:
+        return A_ca
+    t_row, t_col = centroids[trigger_cluster_id]
+
+    # Clusters roughly abeam of the trigger: within 50 px along-slope, at
+    # least 5 px across-slope so the pair actually spans a lateral distance.
+    lateral = sorted(
+        ((cid, abs(c_col - t_col)) for cid, (c_row, c_col) in centroids.items()
+         if cid != trigger_cluster_id
+         and abs(c_row - t_row) < 50 and abs(c_col - t_col) > 5),
+        key=lambda x: x[1])[:n_lateral_neighbors]
+    if not lateral:
+        return A_ca
+
+    px_m = abs(transform.a) if transform is not None else 1.0
     theta_cross_vals = []
     for cid, dist_px in lateral:
-        if cid not in meloche_df.index:
+        if cid not in tau_frame.index:
             continue
-        col_name = ('tau_p' if 'tau_p' in meloche_df.columns
-                    else 'wl_shear_strength')
-        tau_lat = float(pd.to_numeric(meloche_df.loc[cid, col_name], errors='coerce'))
-        if not np.isnan(tau_lat) and dist_px > 0:
-            theta_cross_vals.append(abs(tau_trigger - tau_lat) / dist_px)
+        tau_lat = float(pd.to_numeric(
+            first_scalar(tau_frame.loc[cid, tau_col]), errors='coerce'))
+        dist_m = dist_px * px_m
+        if not np.isnan(tau_lat) and dist_m > 0:
+            theta_cross_vals.append(abs(tau_trigger - tau_lat) / dist_m)
 
     if not theta_cross_vals:
         return A_ca
 
     theta_cross = float(np.mean(theta_cross_vals))
-    if theta_cross > 1e-6:
+    if theta_cross > config.THETA_MIN:
         width_factor = min(theta_down / theta_cross, gaume_aspect_cap)
     else:
         width_factor = gaume_aspect_cap
@@ -245,7 +326,8 @@ def make_release_polygon_2d(
         snap_features: 'Optional[pd.DataFrame]' = None,
         size_factor: float = 1.0,
         stauchwall_deg: float = STAUCHWALL_DEG,
-        mode3_scale: float = 1.5,
+        max_clusters: int = config.MAX_BFS_CLUSTERS,
+        pixel_index: Optional[dict] = None,
         use_propagation: bool = True):
     """
     Build a 2D release polygon.
@@ -257,11 +339,14 @@ def make_release_polygon_2d(
 
     Returns shapely Polygon (UTM) or None.
     """
-    slope_grid, _ = compute_slope_aspect(dem)
-
-    from shapely.geometry import Polygon, MultiPolygon
+    from shapely.geometry import Polygon
     from shapely.ops import unary_union
     import rasterio.features
+
+    px_m = abs(transform.a) if transform is not None else 1.0
+    slope_grid, aspect_grid = compute_slope_aspect(dem, px_m)
+    if pixel_index is None:
+        pixel_index = cluster_pixel_index(cluster_map)
 
     sz_polygon = None
     if start_zone_mask is not None:
@@ -304,7 +389,7 @@ def make_release_polygon_2d(
         return poly
 
     if use_propagation and not meloche_df.empty:
-        polygon, failed = propagate_crack(
+        polygon, _reached = propagate_crack(
             trigger_cluster_id = trigger_cluster_id,
             meloche_df         = meloche_df,
             cluster_map        = cluster_map,
@@ -313,10 +398,12 @@ def make_release_polygon_2d(
             transform          = transform,
             start_zone_mask    = start_zone_mask,
             stauchwall_deg     = stauchwall_deg,
-            mode3_scale        = mode3_scale,
             size_factor        = size_factor,
             A_ca               = A_ca,
             snap_features      = snap_features,
+            max_clusters       = max_clusters,
+            pixel_index        = pixel_index,
+            aspect_grid        = aspect_grid,
         )
         if polygon is not None:
             polygon = _clip_polygon(polygon)
@@ -325,21 +412,21 @@ def make_release_polygon_2d(
         print(f"  propagate_crack returned None for cluster {trigger_cluster_id}"
               f" — falling back to rectangle")
 
-    _, aspect_grid = compute_slope_aspect(dem)
-    trig_px = np.argwhere(cluster_map == trigger_cluster_id)
-    if len(trig_px) == 0:
+    if trigger_cluster_id not in pixel_index:
         return None
-    t_row, t_col = trig_px.mean(axis=0).astype(int)
+    rows, cols  = pixel_index[trigger_cluster_id]
+    t_row, t_col = int(rows.mean()), int(cols.mean())
     t_x, t_y    = pixel_to_utm(t_row, t_col, transform)
     t_aspect    = float(aspect_grid[t_row, t_col])
 
     up_x, up_y  = project_along_aspect(t_x, t_y, A_ca * size_factor,
                                         t_aspect, upslope=True)
     sw_row, sw_col = find_stauchwall(t_row, t_col, slope_grid, aspect_grid,
-                                     transform, threshold_deg=stauchwall_deg)
+                                     threshold_deg=stauchwall_deg)
     sw_x, sw_y  = pixel_to_utm(sw_row, sw_col, transform)
     half_width  = estimate_cross_slope_width(
-        trigger_cluster_id, A_ca, meloche_df, cluster_map, transform
+        trigger_cluster_id, A_ca, meloche_df, cluster_map, transform,
+        snap_features=snap_features, pixel_index=pixel_index,
     ) * size_factor / 2.0
 
     asp_rad = np.radians(t_aspect)
@@ -371,12 +458,13 @@ def propagate_crack(
         transform,
         start_zone_mask: Optional[np.ndarray] = None,
         stauchwall_deg: float = STAUCHWALL_DEG,
-        mode3_scale: float = 2.0,
         size_factor: float = 1.0,
         A_ca: Optional[float] = None,
         snap_features: 'Optional[pd.DataFrame]' = None,
-        k_neighbours: int = 8,
-        max_clusters: int = 500,
+        k_neighbours: int = config.BFS_K_NEIGHBOURS,
+        max_clusters: int = config.MAX_BFS_CLUSTERS,
+        pixel_index: Optional[dict] = None,
+        aspect_grid: Optional[np.ndarray] = None,
         wave_callback=None):
     """
     Identify release zone as the connected region of clusters reachable
@@ -385,134 +473,106 @@ def propagate_crack(
     Starting from the trigger cluster, expands outward to neighbouring
     clusters in order of proximity. A cluster is included if it passes
     distance caps (upslope A_ca, downslope stauchwall, lateral Gaume width),
-    slope, slab thickness, and elastic-length continuity checks.
+    the stauchwall slope angle, an absolute tau_g floor, slab thickness, and
+    Lambda/thickness continuity checks.
+
+    Note: the Meloche per-direction arrest criterion is gated behind
+    config.USE_MELOCHE_ARREST and is off by default — the continuity
+    heuristics plus config.TAU_G_ABS_FLOOR do the arresting. See methods §5.
+
+    Returns (polygon, reached_cluster_ids).
     """
-    from collections import deque
-    from shapely.geometry import MultiPolygon
     from shapely.ops import unary_union
+    from shapely.geometry import shape as shapely_shape
     import rasterio.features
 
     if meloche_df.empty or trigger_cluster_id not in meloche_df.index:
         return None, set()
-
-    loc = meloche_df.loc[trigger_cluster_id]
-    row = loc.iloc[0] if isinstance(loc, pd.DataFrame) else loc
-
-    col = 'Pi1_elastic' if 'Pi1_elastic' in meloche_df.columns else None
-    if col is None:
+    if 'Pi1_elastic' not in meloche_df.columns:
         return None, set()
 
-    pi1_raw = row[col]
-    pi1_trigger = float(pi1_raw.iloc[0] if isinstance(pi1_raw, pd.Series)
-                        else pi1_raw)
+    pi1_trigger = float(first_scalar(meloche_df.loc[trigger_cluster_id, 'Pi1_elastic']))
     if np.isnan(pi1_trigger) or pi1_trigger <= 0:
         return None, set()
 
-    TAU_G_ABS_FLOOR = 350.0   # Pa
+    if pixel_index is None:
+        pixel_index = cluster_pixel_index(cluster_map)
+    if trigger_cluster_id not in pixel_index:
+        return None, set()
+
+    px_m = abs(transform.a) if transform is not None else 1.0
+    if aspect_grid is None:
+        _, aspect_grid = compute_slope_aspect(dem, px_m)
 
     print(f"    Pi1_trigger={pi1_trigger:.3f}  "
-          f"tau_g_floor={TAU_G_ABS_FLOOR:.0f}Pa  "
+          f"tau_g_floor={config.TAU_G_ABS_FLOOR:.0f}Pa  "
           f"size_factor={size_factor:.2f}")
 
-    def _scalar(cid, c):
-        if cid not in meloche_df.index:
-            return np.nan
-        v = meloche_df.loc[cid, c]
-        if isinstance(v, pd.DataFrame): v = v.iloc[0][c]
-        elif isinstance(v, pd.Series):  v = v.iloc[0]
-        return float(v)
+    slope_cache: dict[int, float] = {}
 
     def _mean_slope(cid):
-        pxs = np.argwhere(cluster_map == cid)
-        if len(pxs) == 0:
-            return 0.0
-        return float(slope_grid[pxs[:, 0], pxs[:, 1]].mean())
+        if cid not in slope_cache:
+            px = pixel_index.get(cid)
+            slope_cache[cid] = (float(slope_grid[px[0], px[1]].mean())
+                                if px is not None else 0.0)
+        return slope_cache[cid]
 
-    t_pxs = np.argwhere(cluster_map == trigger_cluster_id)
-    if len(t_pxs) == 0:
-        return None, set()
-    t_row  = int(t_pxs.mean(axis=0)[0])
-    t_col  = int(t_pxs.mean(axis=0)[1])
+    t_rows, t_cols = pixel_index[trigger_cluster_id]
+    t_row, t_col = int(t_rows.mean()), int(t_cols.mean())
     t_x, t_y = pixel_to_utm(t_row, t_col, transform)
-    _, aspect_grid = compute_slope_aspect(dem)
     t_aspect = float(aspect_grid[t_row, t_col])
 
     d_up = (max(A_ca, 20.0) if A_ca else 50.0) * size_factor
 
     sw_row, sw_col = find_stauchwall(
-        t_row, t_col, slope_grid, aspect_grid, transform,
-        threshold_deg=stauchwall_deg)
+        t_row, t_col, slope_grid, aspect_grid, threshold_deg=stauchwall_deg)
     sw_x, sw_y = pixel_to_utm(sw_row, sw_col, transform)
-    d_down = max(float(np.sqrt((sw_x - t_x)**2 + (sw_y - t_y)**2)),
-                 20.0) * size_factor
+    d_down = max(float(np.hypot(sw_x - t_x, sw_y - t_y)), 20.0) * size_factor
 
     print(f"    distance caps: up={d_up:.0f}m  down={d_down:.0f}m")
 
     from sklearn.neighbors import NearestNeighbors
-    cids = np.array([c for c in np.unique(cluster_map) if c > 0])
-    pxs  = np.array([np.argwhere(cluster_map == c).mean(axis=0) for c in cids])
-    k_actual = min(k_neighbours + 1, len(cids))
-    nbrs     = NearestNeighbors(n_neighbors=k_actual).fit(pxs)
-    _, idxs  = nbrs.kneighbors(pxs)
+    cents_px   = cluster_centroids_px(pixel_index)
+    cids       = np.array(sorted(cents_px))
+    pxs        = np.array([cents_px[c] for c in cids])
+    k_actual   = min(k_neighbours + 1, len(cids))
+    nbrs       = NearestNeighbors(n_neighbors=k_actual).fit(pxs)
+    _, idxs    = nbrs.kneighbors(pxs)
     neighbours = {int(cids[i]): [int(cids[j]) for j in idxs[i][1:]]
                   for i in range(len(cids))}
 
-    centroids = {int(c): pixel_to_utm(int(pxs[i][0]), int(pxs[i][1]), transform)
+    centroids = {int(c): pixel_to_utm(int(round(pxs[i][0])),
+                                      int(round(pxs[i][1])), transform)
                  for i, c in enumerate(cids)}
-
-    tau_p_trigger = None
-    if snap_features is not None and trigger_cluster_id in snap_features.index:
-        raw = snap_features.loc[trigger_cluster_id, 'wl_shear_strength'] \
-              if 'wl_shear_strength' in snap_features.columns else np.nan
-        if isinstance(raw, pd.Series): raw = raw.iloc[0]
-        v = float(raw)
-        tau_p_trigger = v if not np.isnan(v) and v > 0 else None
-    if tau_p_trigger is None:
-        print(f"    Warning: no tau_p for trigger {trigger_cluster_id}, "
-              f"WL strength criterion disabled")
 
     d_lat = estimate_cross_slope_width(
         trigger_cluster_id, A_ca if A_ca else 50.0,
-        meloche_df, cluster_map, transform) * size_factor
+        meloche_df, cluster_map, transform,
+        snap_features=snap_features, pixel_index=pixel_index) * size_factor
     d_lat = max(d_lat, 15.0)
 
-    lambda_trigger = None
-    if not meloche_df.empty and 'Lambda' in meloche_df.columns:
-        lam_vals = meloche_df['Lambda'].dropna()
-        if len(lam_vals):
-            lam_raw = float(lam_vals.median())
-            if lam_raw > 0:
-                lambda_trigger = lam_raw
-                print(f"    Lambda_median={lambda_trigger:.2f}m  "
-                      f"(trigger own={_scalar(trigger_cluster_id, 'Lambda'):.2f}m)")
+    print(f"    d_lat={d_lat:.0f}m")
 
-    tau_p_str = f"{tau_p_trigger:.0f} Pa" if tau_p_trigger else "N/A"
-    print(f"    tau_p_trigger={tau_p_str}  d_lat={d_lat:.0f}m")
-
-    LAMBDA_DROP_FACTOR     = 0.20
-    LAMBDA_RISE_FACTOR     = 0.30
-    THICKNESS_DROP_FACTOR  = 0.20
-    THICKNESS_RISE_FACTOR  = 0.30
-    MIN_PROPAGATION_SLAB   = 0.50
-    MIN_PROPAGATION_LAMBDA = 0.1
+    LAMBDA_DROP_FACTOR     = config.LAMBDA_DROP_FACTOR
+    LAMBDA_RISE_FACTOR     = config.LAMBDA_RISE_FACTOR
+    THICKNESS_DROP_FACTOR  = config.THICKNESS_DROP_FACTOR
+    THICKNESS_RISE_FACTOR  = config.THICKNESS_RISE_FACTOR
+    MIN_PROPAGATION_SLAB   = config.MIN_PROPAGATION_SLAB
+    MIN_PROPAGATION_LAMBDA = config.MIN_PROPAGATION_LAMBDA
+    TAU_G_ABS_FLOOR        = config.TAU_G_ABS_FLOOR
 
     def _get_props(cid):
         props = {'cid': cid}
         if not meloche_df.empty and cid in meloche_df.index:
-            for c in ['Lambda', 'tau_g', 'rc_wl', 'L_t']:
+            for c in ['Lambda', 'Lambda_cross', 'tau_g', 'rc_wl', 'L_t']:
                 if c in meloche_df.columns:
-                    v = meloche_df.loc[cid, c]
-                    if isinstance(v, pd.DataFrame): v = v.iloc[0][c]
-                    elif isinstance(v, pd.Series):  v = v.iloc[0]
-                    props[c] = float(v)
+                    props[c] = float(first_scalar(meloche_df.loc[cid, c]))
         if snap_features is not None and cid in snap_features.index:
             for c in ['slab_thickness', 'slab_density',
                       'wl_shear_strength', 'sigma_t']:
                 if c in snap_features.columns:
-                    v = snap_features.loc[cid, c]
-                    if isinstance(v, pd.Series): v = v.iloc[0]
                     try:
-                        props[c] = float(v)
+                        props[c] = float(first_scalar(snap_features.loc[cid, c]))
                     except (ValueError, TypeError):
                         pass
         return props
@@ -521,10 +581,10 @@ def propagate_crack(
 
     def _qualifies(cid, current_props):
         if start_zone_mask is not None:
-            px = np.argwhere(cluster_map == cid)
-            if len(px) == 0:
+            px = pixel_index.get(cid)
+            if px is None:
                 return False, 'no_data'
-            r, c = int(px.mean(axis=0)[0]), int(px.mean(axis=0)[1])
+            r, c = int(px[0].mean()), int(px[1].mean())
             if not start_zone_mask[r, c]:
                 return False, 'outside_start_zone'
 
@@ -539,10 +599,13 @@ def propagate_crack(
 
         is_downslope = dot >  0.707
         is_upslope   = dot < -0.707
+        # Anything not within ±45° of the fall line is treated as cross-slope,
+        # i.e. mode III / flank propagation.
+        is_cross     = not is_upslope and not is_downslope
 
         if is_upslope   and dist > d_up:   return False, 'upslope_distance_cap'
         if is_downslope and dist > d_down: return False, 'downslope_distance_cap'
-        if not is_upslope and not is_downslope and dist > d_lat:
+        if is_cross and dist > d_lat:
             return False, 'lateral_distance_cap'
 
         if not is_upslope and _mean_slope(cid) < stauchwall_deg:
@@ -557,7 +620,7 @@ def propagate_crack(
         if not np.isnan(h_nbr) and h_nbr < MIN_PROPAGATION_SLAB:
             return False, 'thin_slab'
 
-        lam_nbr_abs = nbr_props.get('Lambda', np.nan)
+        lam_nbr_abs = directional_lambda(nbr_props, is_cross)
         if not np.isnan(lam_nbr_abs) and lam_nbr_abs < MIN_PROPAGATION_LAMBDA:
             return False, 'low_lambda'
 
@@ -573,7 +636,7 @@ def propagate_crack(
                 if dist_cn > 1e-6:
                     theta_dir = max(0.0, (tau_p_n - tau_p_c) / dist_cn)
                     if theta_dir > 0.0:
-                        Lam   = nbr_props.get('Lambda',  np.nan)
+                        Lam   = directional_lambda(nbr_props, is_cross)
                         tg    = tau_g_nbr
                         sig_t = nbr_props.get('sigma_t', np.nan)
                         L_t   = nbr_props.get('L_t',     np.nan)
@@ -586,17 +649,27 @@ def propagate_crack(
                                 return False, 'meloche_arrest'
             return True, 'propagated'
 
-        lam_current = current_props.get('Lambda', np.nan)
-        lam_nbr     = nbr_props.get('Lambda', np.nan)
+        # Λ continuity, evaluated with the elastic length and thresholds for
+        # this propagation direction. Cross-slope currently resolves to the
+        # same Λ and the same thresholds as along-slope, so the split is a
+        # no-op until Λ_III lands — see config.USE_MODE3_LAMBDA.
+        lam_current = directional_lambda(current_props, is_cross)
+        lam_nbr     = directional_lambda(nbr_props,     is_cross)
+        lam_drop, lam_rise = (
+            (config.LAMBDA_CROSS_DROP_FACTOR, config.LAMBDA_CROSS_RISE_FACTOR)
+            if is_cross else
+            (LAMBDA_DROP_FACTOR, LAMBDA_RISE_FACTOR))
         if (not np.isnan(lam_current) and not np.isnan(lam_nbr)
                 and lam_current > 0):
             signed_change = (lam_nbr - lam_current) / lam_current
             if signed_change < 0:
-                if -signed_change > LAMBDA_DROP_FACTOR * size_factor:
-                    return False, 'lambda_discontinuity_drop'
+                if -signed_change > lam_drop * size_factor:
+                    return False, ('lambda_cross_discontinuity_drop' if is_cross
+                                   else 'lambda_discontinuity_drop')
             else:
-                if signed_change > LAMBDA_RISE_FACTOR * size_factor:
-                    return False, 'lambda_discontinuity_rise'
+                if signed_change > lam_rise * size_factor:
+                    return False, ('lambda_cross_discontinuity_rise' if is_cross
+                                   else 'lambda_discontinuity_rise')
 
         h_current = current_props.get('slab_thickness', np.nan)
         if (not np.isnan(h_current) and not np.isnan(h_nbr)
@@ -611,13 +684,9 @@ def propagate_crack(
 
         return True, 'propagated'
 
-    qual_ok, qual_reason = _qualifies(trigger_cluster_id, trigger_props)
-    if not qual_ok:
-        pxs_t = np.argwhere(cluster_map == trigger_cluster_id)
-        if len(pxs_t) == 0:
-            return None, set()
-
-    failed         = {trigger_cluster_id}
+    # The trigger cluster is included unconditionally: it is the seed, and it
+    # already passed the generate_scenarios filter chain.
+    reached        = {trigger_cluster_id}
     cluster_props  = {trigger_cluster_id: trigger_props}
     visited        = {trigger_cluster_id}
     current_ring   = [trigger_cluster_id]
@@ -626,7 +695,7 @@ def propagate_crack(
     if wave_callback is not None:
         wave_callback(0, [trigger_cluster_id], [])
 
-    while current_ring and len(failed) < max_clusters:
+    while current_ring and len(reached) < max_clusters:
         ring_idx += 1
         next_ring = []
         ring_arrested = []
@@ -639,7 +708,7 @@ def propagate_crack(
                 visited.add(nbr)
                 qualifies, reason = _qualifies(nbr, current_props)
                 if qualifies:
-                    failed.add(nbr)
+                    reached.add(nbr)
                     cluster_props[nbr] = _get_props(nbr)
                     next_ring.append(nbr)
                 else:
@@ -653,8 +722,16 @@ def propagate_crack(
 
         current_ring = next_ring
 
+    # Distinguish "arrest criteria stopped the crack" from "the safety cap did".
+    cap_bound = len(reached) >= max_clusters and bool(current_ring)
+    if cap_bound:
+        print(f"  WARNING: BFS hit the max_clusters cap ({max_clusters}) with "
+              f"{len(current_ring)} clusters still propagating — this polygon "
+              f"is bounded by the cap, not by arrest criteria. "
+              f"Raise --max-clusters to let the physics terminate it.")
+
     dir_counts = {'upslope': 0, 'downslope': 0, 'lateral': 0, 'other': 0}
-    for cid in failed:
+    for cid in reached:
         if cid == trigger_cluster_id:
             continue
         xy = centroids.get(cid)
@@ -668,31 +745,31 @@ def propagate_crack(
         if   dot < -0.707: dir_counts['upslope']  += 1
         elif dot >  0.707: dir_counts['downslope'] += 1
         else:              dir_counts['lateral']   += 1
-    print(f"  Connected region: {len(failed)} clusters "
+    print(f"  Connected region: {len(reached)} clusters "
           f"(up={dir_counts['upslope']} "
           f"down={dir_counts['downslope']} "
-          f"lat={dir_counts['lateral']})")
+          f"lat={dir_counts['lateral']})"
+          f"{'  [CAP-BOUND]' if cap_bound else ''}")
 
-    if len(failed) < 2:
-        return None, failed
+    if len(reached) < 2:
+        return None, reached
 
-    mask   = np.isin(cluster_map, list(failed)).astype(np.uint8)
+    mask   = np.isin(cluster_map, list(reached)).astype(np.uint8)
     shapes = list(rasterio.features.shapes(
         mask, mask=mask.astype(bool), transform=transform))
     if not shapes:
-        return None, failed
+        return None, reached
 
-    polys   = [__import__('shapely.geometry', fromlist=['shape']).shape(s)
-               for s, v in shapes if v == 1]
+    polys   = [shapely_shape(s) for s, v in shapes if v == 1]
     polygon = unary_union(polys)
     if polygon.geom_type == 'MultiPolygon':
         polygon = max(polygon.geoms, key=lambda p: p.area)
     if polygon.is_empty or polygon.area < MIN_POLYGON_AREA:
-        return None, failed
+        return None, reached
 
     polygon = fill_polygon_holes(polygon)
 
-    return polygon, failed
+    return polygon, reached
 
 
 # -----------------------------------------------------------------------
@@ -723,8 +800,8 @@ def rasterize_release_polygon(polygon,
 # GeoJSON loader (shared by scripts)
 # -----------------------------------------------------------------------
 
-def load_observed_polygon(path, dst_epsg: int = 32613):
-    """Load a GeoJSON polygon file and reproject to UTM (default EPSG:32613)."""
+def load_observed_polygon(path, dst_epsg: int = config.RASTER_EPSG):
+    """Load a GeoJSON polygon file and reproject to the raster CRS."""
     import json
     import re
     from shapely.geometry import shape, Polygon, MultiPolygon
@@ -768,7 +845,7 @@ def _label_from_release_path(path) -> str:
     return Path(path).stem
 
 
-def load_observed_polygons(primary_path, dst_epsg: int = 32613) -> list:
+def load_observed_polygons(primary_path, dst_epsg: int = config.RASTER_EPSG) -> list:
     """Load all avalanche_release_area_*.geojson files from the same directory as primary_path.
 
     Returns a list of (polygon, label) tuples sorted by filename so that new
@@ -831,7 +908,8 @@ def plot_release_comparison(
     fig, ax = plt.subplots(figsize=(10, 10))
 
     fill_dem  = np.where(np.isnan(dem), np.nanmean(dem), dem)
-    hillshade = LightSource(azdeg=315, altdeg=45).hillshade(fill_dem, dx=1.0, dy=1.0)
+    px_m      = abs(transform.a) if transform is not None else 1.0
+    hillshade = LightSource(azdeg=315, altdeg=45).hillshade(fill_dem, dx=px_m, dy=px_m)
     nrows, ncols = dem.shape
     extent = [transform.c,
               transform.c + ncols * transform.a,

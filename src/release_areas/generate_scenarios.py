@@ -12,7 +12,8 @@ Inputs (all pre-computed, no zarr/SNOWPACK dependency):
 
 Outputs:
   <out-dir>/scenarios/scenario_NNN/   one directory per scenario (release.geojson,
-                                       depth.tif, depth.asc, params.json, density.json)
+                                       depth.tif, depth.asc, depth.prj, params.json,
+                                       density.json)
   <out-dir>/scenario_summary.csv
   <out-dir>/release_comparison.png
 
@@ -28,10 +29,12 @@ Usage
       --release-poly  data/little_prof/boundaries/avalanche_release_area_20260118.geojson \\
       --out-dir       outputs/little_prof
 
-  # Full sensitivity sweep (5 triggers × 5 sizes × 3 depths = 75 scenarios):
+  # Release-size sensitivity sweep (5 triggers × 5 sizes = 25 scenarios):
   generate-scenarios ... \\
-      --size-factors 0.75 0.875 1.0 1.125 1.25 \\
-      --depth-pcts   0.25 0.5 0.75
+      --size-factors 0.75 0.875 1.0 1.125 1.25
+
+  # Let the arrest criteria, not the safety cap, bound the region:
+  generate-scenarios ... --max-clusters 2000
 """
 
 from __future__ import annotations
@@ -46,9 +49,12 @@ import rasterio
 
 from release_areas import config
 from release_areas.release_geometry import (
+    first_scalar,
+    cluster_pixel_index,
     make_release_polygon_2d,
+    pixel_to_utm,
     plot_release_comparison,
-    load_observed_polygon,
+    rasterize_release_polygon,
     load_observed_polygons,
 )
 from release_areas.scenario_writer import write_scenario
@@ -56,7 +62,7 @@ from release_areas.snowpack_features import geojson_to_mask
 
 
 def load_kml_mask(kml_path: Path, dem_shape, transform,
-                  dst_epsg: int = 32613) -> np.ndarray:
+                  dst_epsg: int = config.RASTER_EPSG) -> np.ndarray:
     """Parse a KML polygon using stdlib XML (no fastkml dependency)."""
     import xml.etree.ElementTree as ET
     from shapely.geometry import Polygon
@@ -105,17 +111,20 @@ def main():
     ap.add_argument('--release-poly',  default=None)
     ap.add_argument('--out-dir',       required=True)
     ap.add_argument('--n-triggers',         type=int,   default=config.N_TOP_TRIGGERS)
-    ap.add_argument('--size-factors',       type=float, nargs='+', default=[1.0],
+    ap.add_argument('--size-factors',       type=float, nargs='+',
+                    default=config.SIZE_FACTORS,
                     help='Release size multipliers (default: [1.0] — most likely only)')
-    ap.add_argument('--depth-pcts',         type=float, nargs='+', default=[0.5],
-                    help='Depth percentiles (default: [0.5] — most likely only)')
-    ap.add_argument('--stauchwall-deg',     type=float, default=28.0,
-                    help='Slope threshold for stauchwall arrest (default: 28°)')
-    ap.add_argument('--max-slab-thickness', type=float, default=2.0,
+    ap.add_argument('--stauchwall-deg',     type=float, default=config.STAUCHWALL_DEG,
+                    help=f'Slope threshold for stauchwall arrest '
+                         f'(default: {config.STAUCHWALL_DEG}°)')
+    ap.add_argument('--max-slab-thickness', type=float, default=config.MAX_SLAB_THICKNESS,
                     help='Maximum slab thickness for trigger candidates (m). '
                          'Use 1.5 for skier-triggered scenarios, 2.0 for natural/large-slab events.')
-    ap.add_argument('--mode3-scale',        type=float, default=1.5,
-                    help='Mode III lateral arrest multiplier (default: 1.5)')
+    ap.add_argument('--max-clusters',       type=int, default=config.MAX_BFS_CLUSTERS,
+                    help=f'Safety cap on BFS region size in clusters '
+                         f'(default: {config.MAX_BFS_CLUSTERS}). A warning is printed '
+                         f'when the cap, rather than the arrest criteria, stops the '
+                         f'flood-fill — raise it to let the physics terminate.')
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -155,11 +164,11 @@ def main():
     # --- Select top-N trigger clusters (lowest Sk38 = most unstable) ---
     sk38_col = 'min_sk38' if 'min_sk38' in features_df.columns else 'sk38_min'
 
-    MIN_TAU_G          = 40.0
-    MAX_SK38           = 1.0
-    MIN_SLAB_THICKNESS = 0.5
+    MIN_TAU_G          = config.MIN_TAU_G
+    MAX_SK38           = config.MAX_SK38
+    MIN_SLAB_THICKNESS = config.MIN_SLAB_THICKNESS
     MAX_SLAB_THICKNESS = args.max_slab_thickness
-    MIN_SLOPE_TRIGGER  = args.stauchwall_deg + 2.0
+    MIN_SLOPE_TRIGGER  = args.stauchwall_deg + config.SLOPE_MARGIN_DEG
 
     sz_cids = set(int(c) for c in np.unique(cluster_map[start_zone_mask]) if c > 0)
     candidate_ids = [cid for cid in features_df.index if cid in sz_cids]
@@ -238,16 +247,31 @@ def main():
     sk38_vals   = list(triggers_df[sk38_col].round(3))
     print(f"Top-{args.n_triggers} triggers (lowest Sk38): {trigger_ids}  Sk38={sk38_vals}")
 
-    # --- Build depth raster from HS values in features CSV ---
+    # --- Build release-depth raster from per-cluster slab thickness ---
+    # slab_thickness is the failure plane -> surface depth, i.e. the slab that
+    # actually releases. 'hs' is the full ground -> surface snowpack height and
+    # would imply a full-depth release to ground.
+    DEPTH_COL = 'slab_thickness'
+    if DEPTH_COL not in features_df.columns:
+        print(f"ERROR: features CSV has no '{DEPTH_COL}' column.")
+        sys.exit(1)
+
+    pixel_index = cluster_pixel_index(cluster_map)
     depth_raster = np.full(dem.shape, np.nan, dtype=np.float32)
-    if 'hs' in features_df.columns:
-        for cid in features_df.index:
-            hs_val = _scalar(features_df, cid, 'hs')
-            if np.isfinite(hs_val):
-                depth_raster[cluster_map == cid] = float(hs_val)
+    n_depth = 0
+    for cid in features_df.index:
+        px = pixel_index.get(int(cid)) if not pd.isna(cid) else None
+        if px is None:
+            continue
+        d_val = _scalar(features_df, cid, DEPTH_COL)
+        if np.isfinite(d_val) and d_val > 0:
+            depth_raster[px[0], px[1]] = float(d_val)
+            n_depth += 1
+    print(f"  Depth raster from {DEPTH_COL}: {n_depth} clusters, "
+          f"{np.isfinite(depth_raster).sum()} px")
 
     # --- Scenario sweep ---
-    total_scenarios = len(trigger_ids) * len(args.size_factors) * len(args.depth_pcts)
+    total_scenarios = len(trigger_ids) * len(args.size_factors)
     scenario_weight = 1.0 / total_scenarios if total_scenarios > 0 else 1.0
 
     scenarios   = []
@@ -256,21 +280,18 @@ def main():
     trig_labels = []
     trig_ious   = []
     scenario_n  = 0
-    poly        = None  # ensure defined for mel_polys fallback
 
     for trig_id in trigger_ids:
-        A_ca_row = meloche_df.loc[trig_id]
-        A_ca_val = float(A_ca_row['A_ca_brittle']
-                         if not isinstance(A_ca_row['A_ca_brittle'], pd.Series)
-                         else A_ca_row['A_ca_brittle'].iloc[0])
+        if trig_id not in meloche_df.index:
+            print(f"  Skipping trigger {trig_id}: absent from meloche CSV")
+            continue
+        A_ca_val = float(first_scalar(meloche_df.loc[trig_id, 'A_ca_brittle']))
 
         # Trigger centroid
-        pxs = np.argwhere(cluster_map == trig_id)
-        if len(pxs):
-            r, c = pxs.mean(axis=0).astype(int)
-            tx = transform.c + c * transform.a + r * transform.b
-            ty = transform.f + c * transform.d + r * transform.e
-            trig_cents.append((tx, ty))
+        px = pixel_index.get(int(trig_id))
+        if px is not None:
+            r, c = int(px[0].mean()), int(px[1].mean())
+            trig_cents.append(pixel_to_utm(r, c, transform))
         else:
             trig_cents.append(None)
 
@@ -285,70 +306,72 @@ def main():
         if not np.isfinite(density_mean):
             density_mean = 250.0
 
-        scenario_start = len(scenarios)
+        best = {'iou': -1.0, 'poly': None, 'sf': None}
 
         for sf in args.size_factors:
-            for dpct in args.depth_pcts:
-                scenario_n += 1
-                sid = f"scenario_{scenario_n:03d}"
+            scenario_n += 1
+            sid = f"scenario_{scenario_n:03d}"
 
-                poly = make_release_polygon_2d(
-                    trigger_cluster_id = trig_id,
-                    A_ca               = A_ca_val,
-                    meloche_df         = meloche_df,
-                    cluster_map        = cluster_map,
-                    dem                = dem,
+            poly = make_release_polygon_2d(
+                trigger_cluster_id = trig_id,
+                A_ca               = A_ca_val,
+                meloche_df         = meloche_df,
+                cluster_map        = cluster_map,
+                dem                = dem,
+                transform          = transform,
+                start_zone_mask    = start_zone_mask,
+                snap_features      = features_df,
+                size_factor        = sf,
+                stauchwall_deg     = args.stauchwall_deg,
+                max_clusters       = args.max_clusters,
+                pixel_index        = pixel_index,
+            )
+
+            iou = 0.0
+            if poly and observed_polygon:
+                inter = poly.intersection(observed_polygon).area
+                union = poly.union(observed_polygon).area
+                iou   = inter / union if union > 0 else 0.0
+
+            if poly:
+                # Clip the depth raster to this polygon so mean depth and
+                # volume describe the release area, not the whole domain.
+                scenario_depth = rasterize_release_polygon(
+                    poly, depth_raster, dem.shape, transform)
+                row = write_scenario(
+                    scenario_dir       = out_dir / 'scenarios',
+                    scenario_id        = sid,
+                    release_polygon    = poly,
+                    depth_raster       = scenario_depth,
+                    dem_shape          = dem.shape,
                     transform          = transform,
-                    start_zone_mask    = start_zone_mask,
-                    snap_features      = features_df,
+                    crs_wkt            = crs_wkt,
+                    density_mean       = density_mean,
+                    density_std        = density_std,
+                    trigger_cluster_id = int(trig_id),
+                    A_ca               = A_ca_val,
                     size_factor        = sf,
-                    stauchwall_deg     = args.stauchwall_deg,
-                    mode3_scale        = args.mode3_scale,
+                    weight             = scenario_weight,
                 )
+                row['iou'] = iou
+            else:
+                row = {
+                    'scenario_id':      sid,
+                    'trigger_cluster':  int(trig_id),
+                    'A_ca_m':           round(A_ca_val, 2),
+                    'size_factor':      sf,
+                    'release_area_m2':  0.0,
+                    'iou':              0.0,
+                }
+            scenarios.append(row)
 
-                iou = 0.0
-                if poly and observed_polygon:
-                    inter = poly.intersection(observed_polygon).area
-                    union = poly.union(observed_polygon).area
-                    iou   = inter / union if union > 0 else 0.0
+            if iou > best['iou']:
+                best = {'iou': iou, 'poly': poly, 'sf': sf}
 
-                if poly:
-                    row = write_scenario(
-                        scenario_dir       = out_dir / 'scenarios',
-                        scenario_id        = sid,
-                        release_polygon    = poly,
-                        depth_raster       = depth_raster,
-                        dem_shape          = dem.shape,
-                        transform          = transform,
-                        crs_wkt            = crs_wkt,
-                        density_mean       = density_mean,
-                        density_std        = density_std,
-                        trigger_cluster_id = int(trig_id),
-                        A_ca               = A_ca_val,
-                        size_factor        = sf,
-                        depth_percentile   = int(round(dpct * 100)),
-                        weight             = scenario_weight,
-                    )
-                    row['iou'] = iou
-                else:
-                    row = {
-                        'scenario_id':      sid,
-                        'trigger_cluster':  int(trig_id),
-                        'A_ca_m':           round(A_ca_val, 2),
-                        'size_factor':      sf,
-                        'depth_percentile': int(round(dpct * 100)),
-                        'release_area_m2':  0.0,
-                        'iou':              0.0,
-                    }
-                scenarios.append(row)
-
-        # Best IoU for this trigger across all size/depth combinations
-        trig_best_iou = max(
-            (r.get('iou', 0.0) for r in scenarios[scenario_start:]),
-            default=0.0)
-        trig_ious.append(trig_best_iou)
-
-        mel_polys.append((poly, sf))
+        # Plot the polygon whose IoU is being reported, not whichever
+        # size factor happened to come last.
+        trig_ious.append(max(best['iou'], 0.0))
+        mel_polys.append((best['poly'], best['sf']))
         sk38_trig = _scalar(features_df, trig_id, sk38_col)
         trig_labels.append(
             f"T{trigger_ids.index(trig_id)+1} cid={trig_id} "
@@ -358,7 +381,7 @@ def main():
     # --- Summary CSV ---
     summary = pd.DataFrame(scenarios)
     summary_path = out_dir / 'scenario_summary.csv'
-    summary.to_csv(str(summary_path))
+    summary.to_csv(str(summary_path), index=False)
     print(f"\nScenario summary: {summary_path}")
     if not summary.empty:
         areas = summary['release_area_m2'].dropna()

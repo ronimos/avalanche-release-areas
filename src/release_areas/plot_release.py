@@ -27,7 +27,7 @@ import numpy as np
 import rasterio
 from shapely.geometry import shape
 
-from release_areas.release_geometry import plot_release_comparison, load_observed_polygon, load_observed_polygons
+from release_areas.release_geometry import plot_release_comparison, load_observed_polygons
 from release_areas.snowpack_features import geojson_to_mask
 from release_areas.generate_scenarios import load_kml_mask
 

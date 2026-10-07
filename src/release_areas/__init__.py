@@ -4,7 +4,7 @@ release_areas — Avalanche release zone delineation from SNOWPACK features.
 Modules
 -------
 arrest_indices   Meloche et al. (2025) crack-arrest scaling laws
-features         Per-cluster SNOWPACK feature extraction
+snowpack_features Per-cluster SNOWPACK feature extraction
 release_geometry BFS crack-propagation and polygon construction
 scenario_writer  Scenario-to-GeoJSON / CSV output
 config           Default physical and operational parameters

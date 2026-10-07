@@ -1,5 +1,5 @@
 """
-features.py — Per-cluster SNOWPACK feature extraction and Meloche crack-arrest parameters.
+snowpack_features.py — Per-cluster SNOWPACK feature extraction and Meloche crack-arrest parameters.
 
 Provides:
     geojson_to_mask()         Rasterize a GeoJSON polygon to a boolean mask
@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import json
 import re
-import warnings
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -26,26 +24,16 @@ import rasterio
 import rasterio.features
 import rasterio.transform as rt
 
+from release_areas import config
 from release_areas.arrest_indices import evaluate as _ai_evaluate
 
-# Slab/weak-layer material constants
-G_WL = 0.2e6    # weak-layer shear modulus (Pa)
-NU   = 0.3      # slab Poisson's ratio
-
-# SNOWPACK grain type codes (first digit = grain class)
-WL_TYPES   = set(range(400, 500)) | set(range(500, 600))  # FC (4xx), DH (5xx)
-SLAB_TYPES = set(range(200, 300)) | set(range(300, 400))  # DF (2xx), RG (3xx)
+# Slab/weak-layer material constants (config is the source of truth)
+G_WL = config.G_WL   # weak-layer shear modulus (Pa)
+NU   = config.NU     # slab Poisson's ratio
 
 # SNOWPACK zarr variable holding critical cut length r_c (m)
 RC_VAR = 'critical_cut_length'
 
-EVENT_DATE = pd.Timestamp("2026-01-18")
-
-GROUP_COLORS = {
-    'release':   '#d32f2f',
-    'adjacent':  '#1976d2',
-    'reference': '#666666',
-}
 GROUP_LABELS = {
     'release':   'Release zone',
     'adjacent':  'Adjacent slope (start zone)',
@@ -57,14 +45,7 @@ GROUP_LABELS = {
 # Geometry helpers
 # ---------------------------------------------------------------------------
 
-def _reproject_lonlat_to_utm(pts_lonlat, epsg: int = 32613):
-    """Reproject list of (lon, lat) points to UTM."""
-    from pyproj import Transformer
-    t = Transformer.from_crs('EPSG:4326', f'EPSG:{epsg}', always_xy=True)
-    return [t.transform(x, y) for x, y in pts_lonlat]
-
-
-def geojson_to_mask(path, dem_shape, transform, dst_epsg: int = 6342) -> np.ndarray:
+def geojson_to_mask(path, dem_shape, transform, dst_epsg: int = config.RASTER_EPSG) -> np.ndarray:
     """Rasterize a GeoJSON polygon to a boolean mask matching dem_shape."""
     from shapely.geometry import shape
     from shapely.ops import unary_union
@@ -219,7 +200,9 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
     ds_t_loc : xarray Dataset for one location × one timestep (squeezed).
                Must contain variables: z, grain_type, HS, density,
                hand_hardness, grain_size, shear_strength, sk38, ssi, sn38.
-    min_depth_cm : minimum burial depth (cm) for the weak layer.
+    min_depth_cm : minimum weak-layer burial depth (cm). Profiles whose basal
+               weak layer sits shallower than this carry too little slab to
+               release and are returned with slab/WL features omitted.
 
     Returns a dict of scalar features, or {} on failure.
     """
@@ -237,6 +220,11 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
 
     slab_m, wl_m, interface_z = split_wl_slab(gt, z)
     if slab_m is None:
+        return result
+
+    # z is negative downward from the snow surface, so the WL top sits
+    # -interface_z below the surface.
+    if -interface_z < min_depth_cm / 100.0:
         return result
 
     near_interface = ok & (np.abs(z - interface_z) <= 0.05)
@@ -325,7 +313,12 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
     tau_p = result.get('wl_shear_strength', np.nan)
 
     if all(not np.isnan(v) for v in [rho, h_m, D_wl, tau_p]) and D_wl > 0:
+        # Slab elastic modulus — power-law hand-fit to the van Herwijnen et al.
+        # (2016) range: ~2 MPa at rho=200, ~4 MPa at 300, ~6 MPa at 350 kg/m3.
+        # Not a published regression; see methods §4.
         E_slab  = (rho / 300.0)**2.5 * 4.0e6
+        # Slab tensile strength — ~5 kPa at rho=300, inside the Meloche
+        # 2-10 kPa range. Same caveat.
         sigma_t = (rho / 300.0)**1.4 * 5.0e3
         E_prime = E_slab / (1.0 - nu**2)
         K_wl    = G_WL / D_wl
@@ -355,33 +348,31 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
                 Use {'all': features_df} when group labels don't matter.
     cluster_map : 2D int array of cluster IDs matching dem.
     dem         : 2D float array (m), same shape as cluster_map.
-    transform   : rasterio Affine transform for dem (pixel size used for
-                  converting centroid distance to metres).
+    transform   : rasterio Affine transform for dem. Its pixel size converts
+                  centroid separations to metres, so theta comes out in Pa/m.
     snap_ts     : unused, kept for API compatibility.
 
     Returns DataFrame indexed by cluster_id.
     """
-    PHI_DEG     = 27.0
-    DELTA       = 1.0
-    L_SS        = 20.0
-    K_NEIGHBORS = 6
+    from release_areas.release_geometry import cluster_pixel_index
+
+    PHI_DEG     = config.PHI_DEG
+    DELTA       = config.DELTA
+    K_NEIGHBORS = config.K_NEIGHBORS
     G_GRAV      = 9.81
+    px_m        = abs(transform.a) if transform is not None else 1.0
 
     fill_dem = np.where(np.isnan(dem), np.nanmean(dem), dem)
-    dy, dx   = np.gradient(fill_dem, 1.0)
+    dy, dx   = np.gradient(fill_dem, px_m)
     slope    = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
 
-    cluster_ids = np.unique(cluster_map[~np.isnan(dem)])
-    cluster_ids = cluster_ids[cluster_ids > 0]
+    pixel_index = cluster_pixel_index(np.where(np.isnan(dem), 0, cluster_map))
 
     centroids = {}
     slopes_cl = {}
-    for cid in cluster_ids:
-        mask = cluster_map == cid
-        rows, cols = np.where(mask)
-        if len(rows):
-            centroids[cid] = (float(rows.mean()), float(cols.mean()))
-            slopes_cl[cid] = float(slope[mask].mean())
+    for cid, (rows, cols) in pixel_index.items():
+        centroids[cid] = (float(rows.mean()), float(cols.mean()))
+        slopes_cl[cid] = float(slope[rows, cols].mean())
 
     all_rows = []
     for grp, df in snap_data.items():
@@ -446,14 +437,15 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
             continue
 
         tau_g_guard = rho * G_GRAV * h_m * sin_psi
-        if tau_g_guard < 50.0:
+        if tau_g_guard < config.TAU_G_FEATURE_FLOOR:
             rows_out.append({'cluster_id': cid, 'tau_g': tau_g_guard,
                              'slope_angle': psi_deg,
                              'note': 'tau_g below valid range for scaling law'})
             continue
 
+        # Distances come back in pixels; px_m converts them so theta is Pa/m.
         neighbor_idx  = indices[i][1:]
-        neighbor_dist = distances[i][1:]
+        neighbor_dist = distances[i][1:] * px_m
         theta_vals = []
         for j, d in zip(neighbor_idx, neighbor_dist):
             if d < 1e-6:
@@ -463,14 +455,14 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
                 theta_vals.append(abs(tau_p - tau_j) / d)
 
         theta = float(np.mean(theta_vals)) if theta_vals else np.nan
-        if np.isnan(theta) or theta < 1e-6:
+        if np.isnan(theta) or theta < config.THETA_MIN:
             rows_out.append({'cluster_id': cid, 'tau_g': tau_g_guard,
                              'theta': theta, 'slope_angle': psi_deg})
             continue
 
         D_wl_val   = row.get('wl_thickness', np.nan)
         if np.isnan(D_wl_val) or D_wl_val <= 0:
-            D_wl_val = 0.04
+            D_wl_val = config.D_WL_FALLBACK
         tau_p0_val = row.get('wl_shear_strength', np.nan)
 
         ai = _ai_evaluate(
@@ -485,18 +477,25 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
         denom       = theta * Lambda_ai * np.sqrt(1.0 + DELTA)
         Pi1         = tau_g_ai / denom
         Pi2         = Pi1 * np.sqrt(sigma_t / tau_g_ai)
-        A_ca_elastic = L_SS * Pi1 ** 1.5
 
+        # A_ca_elastic (JGR Eq. 19) is deliberately not emitted: the paper
+        # gives it as a proportionality with no published constant, so an
+        # absolute length would be uncalibrated. Pi1_elastic carries the
+        # same information in dimensionless form.
         rows_out.append({
             'cluster_id':   cid,
             'slope_angle':  psi_deg,
             'tau_g':        tau_g_ai,
             'theta':        theta,
+            'tau_p':        tau_p,
             'Pi1_elastic':  Pi1,
             'Pi2_brittle':  Pi2,
             'Lambda':       Lambda_ai,
+            # Mode III elastic length from the current (unpublished)
+            # derivation. Written so the data side is ready; propagation only
+            # reads it when config.USE_MODE3_LAMBDA is set.
+            'Lambda_cross': ai.get('Lambda_cross', np.nan),
             'L_t':          ai.get('L_t',         np.nan),
-            'A_ca_elastic': A_ca_elastic,
             'A_ca_brittle': ai.get('A_ca',         np.nan),
             'rc_wl':        row.get('rc_wl',       np.nan),
             'G_slab':       ai.get('G_slab',       np.nan),

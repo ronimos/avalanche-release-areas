@@ -9,22 +9,22 @@ Provides:
     write_metadata()            Run metadata JSON
     write_asc()                 ASCII grid (AvaFrame legacy format)
 
-The output directory structure follows the design in step_scenarios_design.md:
+write_scenario() is what generate_scenarios calls; it produces one directory
+per scenario:
 
-    outputs/scenarios/YYYY-MM-DD/
-        metadata.json
-        trigger_locations.geojson
-        scenario_weights.json
-        summary.csv
-        scenarios/
-            scenario_001/
-                release.geojson   release polygon + properties
-                depth.tif         float32 GeoTIFF, depth (m), NaN outside
-                depth.asc         ASCII grid (AvaFrame legacy)
-                density.json      slab density mean + std
-                params.json       com1DFA run parameters
+    <out-dir>/scenarios/scenario_001/
+        release.geojson   release polygon + properties
+        depth.tif         float32 GeoTIFF, release depth (m), NaN outside
+        depth.asc         ASCII grid (AvaFrame legacy)
+        depth.prj         CRS sidecar for depth.asc
+        density.json      slab density mean + std
+        params.json       com1DFA run parameters
 
-No CLI. Called by analysis_pipeline.py step_scenarios().
+The remaining writers here (trigger locations, weights, summary, metadata) are
+helpers for an ensemble driver; generate_scenarios does not call them and
+writes its own scenario_summary.csv.
+
+No CLI.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import rasterio
+
+from release_areas import config
 
 
 # -----------------------------------------------------------------------
@@ -130,7 +132,6 @@ def write_scenario(scenario_dir: Path,
                    trigger_cluster_id: int,
                    A_ca: float,
                    size_factor: float,
-                   depth_percentile: int,
                    weight: float,
                    mu: float = 0.155,
                    xi: float = 1500.0,
@@ -148,7 +149,10 @@ def write_scenario(scenario_dir: Path,
     scenario_dir        : parent directory (scenarios/); subdir created here
     scenario_id         : e.g. 'scenario_001'
     release_polygon     : shapely Polygon (UTM) or None
-    depth_raster        : float32 array (m), NaN outside release area
+    depth_raster        : float32 array of release depth (m), NaN outside the
+                          release polygon. Callers should pass the output of
+                          rasterize_release_polygon(); an unclipped raster makes
+                          mean_depth_m and total_volume_m3 domain-wide.
     dem_shape           : (nrows, ncols)
     transform           : rasterio Affine
     crs_wkt             : CRS as WKT string
@@ -156,7 +160,6 @@ def write_scenario(scenario_dir: Path,
     trigger_cluster_id  : cluster ID of trigger point
     A_ca                : Meloche crack arrest length (m)
     size_factor         : release size multiplier (1.0 = median)
-    depth_percentile    : 10 / 50 / 90
     weight              : scenario probability weight
     mu, xi              : Voellmy friction parameters
     profile             : rasterio profile dict (if None, built from args)
@@ -187,7 +190,6 @@ def write_scenario(scenario_dir: Path,
             'trigger_cluster':   int(trigger_cluster_id),
             'A_ca_m':            round(float(A_ca), 2),
             'size_factor':       round(float(size_factor), 3),
-            'depth_percentile':  int(depth_percentile),
             'weight':            round(float(weight), 6),
             'release_area_m2':   round(area_m2, 1),
         }
@@ -200,7 +202,7 @@ def write_scenario(scenario_dir: Path,
             'type': 'FeatureCollection',
             'crs': {
                 'type': 'name',
-                'properties': {'name': 'EPSG:6342'},
+                'properties': {'name': f'EPSG:{config.RASTER_EPSG}'},
             },
             'features': [feature],
         }
@@ -228,7 +230,8 @@ def write_scenario(scenario_dir: Path,
 
     write_asc(depth_raster, transform, out / 'depth.asc')
 
-    # Write .prj sidecar for depth.asc (EPSG:6342 — NAD83(2011) / UTM 13N)
+    # Write .prj sidecar for depth.asc. Hardcoded to EPSG:6342
+    # (NAD83(2011) / UTM 13N) to match config.RASTER_EPSG.
     prj_wkt = (
         'PROJCS["NAD83(2011) / UTM zone 13N",'
         'GEOGCS["NAD83(2011)",'
@@ -264,7 +267,6 @@ def write_scenario(scenario_dir: Path,
         'total_volume_m3':  round(total_vol, 1),
         'A_ca_m':           round(float(A_ca), 2),
         'size_factor':      round(float(size_factor), 3),
-        'depth_percentile': int(depth_percentile),
         'trigger_cluster':  int(trigger_cluster_id),
         'scenario_probability': round(float(weight), 6),
         'note': ('Voellmy parameters: defaults. '
@@ -285,7 +287,6 @@ def write_scenario(scenario_dir: Path,
         'trigger_cluster':  int(trigger_cluster_id),
         'A_ca_m':           round(float(A_ca), 2),
         'size_factor':      round(float(size_factor), 3),
-        'depth_percentile': int(depth_percentile),
         'release_area_m2':  round(area_m2, 1),
         'mean_depth_m':     round(mean_depth, 3),
         'total_volume_m3':  round(total_vol, 1),
@@ -332,7 +333,7 @@ def write_summary_csv(rows: list[dict], out_path: Path) -> None:
     df = pd.DataFrame(rows)
     col_order = [
         'scenario_id', 'trigger_cluster', 'A_ca_m', 'size_factor',
-        'depth_percentile', 'release_area_m2', 'mean_depth_m',
+        'release_area_m2', 'mean_depth_m',
         'total_volume_m3', 'weight',
         'scour_depth_m', 'scour_depth_mid_m', 'hand_hardness_value',
     ]
@@ -347,7 +348,6 @@ def write_metadata(out_path: Path,
                    n_scenarios: int,
                    n_triggers: int,
                    size_factors: list,
-                   depth_percentiles: list,
                    mu: float,
                    xi: float,
                    a_ca_stats: Optional[dict] = None) -> None:
@@ -364,12 +364,11 @@ def write_metadata(out_path: Path,
 
     meta = {
         'snapshot_date':    snapshot_date,
-        'generated_at':     datetime.datetime.utcnow().isoformat() + 'Z',
+        'generated_at':     datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'git_hash':         git_hash,
         'n_scenarios':      n_scenarios,
         'n_trigger_locations': n_triggers,
         'size_factors':     size_factors,
-        'depth_percentiles':depth_percentiles,
         'voellmy_mu':       mu,
         'voellmy_xi':       xi,
         'a_ca_stats':       a_ca_stats or {},
