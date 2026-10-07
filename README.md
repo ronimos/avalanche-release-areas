@@ -73,6 +73,28 @@ python -m release_areas.plot_release \
 
 After `pip install -e .` the same commands are also available as `generate-scenarios` and `plot-release` console scripts.
 
+## Building the input CSVs from SNOWPACK / xsnow
+
+The quick-start above uses pre-computed CSVs from `data/little_prof/features/`. For a new date or path, you need to generate them from a SNOWPACK simulation run loaded into [xsnow](https://xsnow.readthedocs.io).
+
+See [`examples/compute_indices_from_xsnow.py`](examples/compute_indices_from_xsnow.py) for the complete workflow:
+
+1. Open a distributed SNOWPACK run as an xsnow Dataset (from zarr store or `.pro` files)
+2. Select the analysis timestep and call `profile_features()` for each cluster profile — extracts slab ρ/h/E/σt, WL shear strength τp, grain type, Sk38, and elastic quantities
+3. Call `compute_meloche_features()` across all clusters — adds spatial θ gradient, Π₁, A_ca, R0, and the full arrest-index suite
+4. Write the two CSVs that `generate_scenarios` reads directly
+
+**Environment note:** xsnow, xarray, and dask are not in this package's dependencies — they live in the avachain simulation environment. Install this package there with `pip install -e .` and run the example from that environment.
+
+```bash
+# From avachain environment, repo root:
+python examples/compute_indices_from_xsnow.py
+# → data/little_prof/features/all_start_zone_features_2026-01-18.csv
+# → data/little_prof/features/meloche_features_all_2026-01-18.csv
+```
+
+The script prints a sanity check (τg ≥ 40 Pa candidate count, R0 median) that should match the filter-chain output from `generate_scenarios`.
+
 ## Run tests
 
 ```bash
@@ -81,7 +103,7 @@ pytest tests/ -v
 
 ## Physical model
 
-See [`docs/crack_arrest_indices_reference.md`](docs/crack_arrest_indices_reference.md) for full derivations, calibration, and the Jan 18 2026 application.
+See [`docs/release_area_methods.md`](docs/release_area_methods.md) for full derivations, calibration, and the Jan 18 2026 application.
 
 Crack-arrest scaling law (Meloche et al. 2025, JGR Earth Surface):
 

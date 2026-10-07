@@ -198,6 +198,21 @@ Expected differences from upslope, not yet simulated:
 
 Without θ, the energy framework still gives τp* and R0 = G_c(τp0)/G_slab, a per-profile index of how far weak-layer strength must rise before a crack stops.
 
+### Building the feature CSVs from xsnow
+
+`examples/compute_indices_from_xsnow.py` shows the complete path from a distributed SNOWPACK run to the two CSVs consumed by `generate_scenarios`. The xsnow Dataset is expected to have dimensions `(location, time, layer)` with at minimum:
+
+| Variable | xsnow name | Used for |
+|---|---|---|
+| Layer height from snow surface | `z` | WL burial depth, slab thickness |
+| Grain type (SNOWPACK code) | `grain_type` | FC/DH identification (4xx, 5xx) |
+| Layer density | `density` | slab ρ, E, σt parameterisation |
+| WL shear strength | `shear_strength` | τp0 (SNOWPACK output 0508) |
+| Sk38 | `sk38` | filter gate |
+| SSI, SN38, r_c | `ssi`, `sn38`, `critical_cut_length` | optional stability diagnostics |
+
+`profile_features()` finds the basal FC/DH weak layer, labels everything above it as the slab, and returns a flat dict per cluster. `compute_meloche_features()` adds the spatial θ gradient and the full Meloche index suite. Both functions are in `release_areas.snowpack_features`.
+
 ---
 
 ## 5. Trigger cluster pipeline
