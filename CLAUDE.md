@@ -20,7 +20,9 @@ src/release_areas/
   scenario_writer.py   — writes GeoJSON + depth raster per scenario
   config.py            — all tunable constants (single source of truth)
 tests/
-  test_arrest_indices.py — 34 unit tests for arrest_indices.py (all must pass)
+  test_arrest_indices.py    — 42 unit tests for arrest_indices.py
+  test_snowpack_features.py — 12 tests for element geometry helpers
+  test_layered_slab.py      — 72 tests for layered sigma_t/E + ligament
 docs/
   release_area_methods.md — full derivation, calibration, Jan 18 application
 data/little_prof/      — Little Professor path, Jan 18 2026 event (CC BY 4.0)
@@ -73,13 +75,121 @@ Expected output (verified):
 - Best IoU vs observed crown: 0.639 at the default `--max-clusters 500`
   (3 of 5 polygons are cap-bound), 0.667 at `--max-clusters 2000`
 
+**The shipped CSVs predate the element-weighting fix** (see below), so these
+numbers are the pre-fix baseline. They still reproduce exactly, because
+`generate_scenarios` reads the CSVs and never calls `profile_features`.
+
+## Element weighting in profile_features
+
+SNOWPACK's `z` is exactly `height_above_ground - HS`, so `np.diff` of sorted
+`z` with the ground prepended at `-HS` recovers each element's own thickness
+and those thicknesses sum to `HS` (verified to machine precision against the
+zarr `height` variable; `element_thickness()`).
+
+Two consequences, both fixed 2026-10-07 in this repo and in avachain's
+`snowpack_analysis.py`:
+
+- Bulk slab means are **thickness-weighted**, not element means. Element
+  thicknesses span 3–38 mm within one profile, so a plain mean over-weights
+  thin layers. Measured effect on Jan 18: ρ ×1.013, E ×1.033, τg ×1.004.
+- A layer's thickness is the **sum of its elements' dz**, not the span of their
+  `z`, which silently omits the basal element. `wl_thickness` was undercounting
+  D_wl by a median 23% (p95 49%). Since the basal WL starts at the ground,
+  `D_wl == hs - slab_thickness` exactly — useful for patching old CSVs.
+  `crust_thickness` had the same defect, and also counted non-crust elements
+  sandwiched between two crusts.
+
+Λ ∝ √D_wl, so Λ rose ×1.13 and A_ca fell ×0.86. Measured end-to-end on Jan 18
+with everything else held byte-identical: best IoU **0.667 → 0.636** at
+`--max-clusters 2000`, mean area/observed 0.813 → 0.782. The fit got *worse* —
+an inflated A_ca was partly compensating for the under-covered crown. That is
+not a reason to revert it and **not** a licence to re-tune anything else.
+
+`wl_shear_strength` (τp) is deliberately still a plain element mean: weighting
+it is a modelling choice (a crack runs in the weakest sublayer, so the minimum
+may be the right reduction), and it cascades into θ and the trigger ranking.
+
+## Material relations are selectable — check which is active
+
+Every relation below is a *named option*; nothing is hardcoded any more, and
+the defaults changed on 2026-10-07. All live in `arrest_indices.py`.
+
+| What | Default | Options | Source of the default |
+|------|---------|---------|-----------------------|
+| `slab_modulus` | `vanherwijnen2016` | + `project_fit` | van Herwijnen et al. (2016) *J. Glaciol.* 62(236) Eq. 8: E = 0.93 ρ^2.8 Pa |
+| `slab_tensile_strength` | (only one) | — | **this project** — σt = (ρ/300)^1.4 · 5 kPa, no published source |
+| `k_ic` | `schweizer2004` | + `kirchner2000`; `borstad2013` **gated** | Schweizer, Michot & Kirchner (2004) *Ann. Glaciol.* 38 Eq. 8: K_Ic = 350 Pa·m · (ρ/917)² / √d_max |
+
+- **`project_fit` is ours, not van Herwijnen's.** It is a hand-fit through the
+  *range* that paper reports and sits 1.6–2.2× below their actual regression.
+  `C_FIT` was calibrated at E = 4 MPa, ρ = 250 (Meloche Table 1 fixes ρ = 250
+  and sweeps E as a constant — **there is no E(ρ) in Meloche**). At ρ = 250
+  `project_fit` gives 2.54 MPa, `vanherwijnen2016` gives 4.82 MPa, so the new
+  default is the one consistent with the calibration point.
+- **`kirchner2000` is a LOWER BOUND on K_Ic** — apparent toughness from small
+  cantilever beams, so it carries the small-specimen size effect.
+- **The ρ exponent we use in `schweizer2004` is 2.0; the paper's printed Eq. 8
+  carries 1.9** (its abstract says "about 2"). Verified against the PDF
+  2026-10-08. 2.0 is 11% low at ρ = 300 and 17% low at ρ = 150;
+  `SCH2004_EXP_PAPER` restores 1.9. The default stays 2.0 because that is what
+  was specified and tested — this is our approximation, not Schweizer et al.'s.
+- **`schweizer2004` is only valid to 300 kg m⁻³**, below our median slab
+  density (~330). `k_ic()` clamps ρ into the fitted range *for the K_Ic
+  evaluation only* (never elsewhere) and `n_rho_clamped` counts it: on Jan 18
+  that is a median 46 of 71 layers per cell, and over the full space-time run a
+  median 46 of 81 with 94.3% of slabs carrying ≥1 clamped layer. K_Ic is
+  effectively saturated over most of the slab. `clamp=False` restores
+  NaN-outside-range.
+- **`borstad2013` raises `NotImplementedError`** — bronze OA at Wiley only, no
+  repository copy, so the regression has never been sourced.
+- `d_max = DMAX_FACTOR · grain_size`, **both in metres**. Our zarr
+  `grain_size` is already in m (median 5.9e-4); raw SNOWPACK `.pro` is in mm.
+
+### Ligament (edge-crack) bound — hypothesis, `USE_LIGAMENT_BOUND = True`
+
+The weakest-link controlling layer is treated as a crack of length a = its own
+thickness in a slab of thickness h; K_Ic and σt come from the **intact** layers
+(thickness-weighted over the slab minus that layer). El Haddad short-crack
+correction is the default:
+
+    sigma_c = K_Ic / (F(a/h) sqrt(pi (a + a0))),  a0 = (K_Ic/(F sigma_t_lig))^2/pi
+
+`F` is the **same** `F(a/h)` in both places, so `a → 0` recovers `sigma_t_lig`
+exactly and no iteration is needed. `self_consistent_a0=True` instead solves
+`a0` at `F(a0/h)` iteratively (kept as an option; its `a → 0` limit is only
+`σt·F(a0/h)/F(0)`). `model='lefm'` gives the uncorrected form, which overshoots
+`sigma_t_lig` on thin controlling layers. A bound is withheld (NaN) when
+`a0 ≥ h` — the intrinsic flaw exceeds the slab and the LEFM geometry is void.
+
+**Not validated.** No K_Ic for snow slabs in tension has been verified against
+a source we hold; the ligament bound has never been fed into the BFS or an IoU.
+
+**Measured 2026-10-08, full space-time run** — all 6 565 clusters × all 501
+six-hourly steps = 3 289 065 profiles, 2 169 737 (66.0%) with a resolved slab.
+Medians: σ_c/σt_lig_intact **0.816** (`schweizer2004` d=1), **0.706** (d=2),
+**0.595** (`kirchner2000`); σt_mean/σt(bulk) 0.875; σt_wl/σt_mean 0.650;
+controlling a/h 0.0118. A_ca(`vanherwijnen2016`)/A_ca(`project_fit`) = **0.692**
+— and that ratio is the *exact* identity √(E_pf/E_vh), because A_ca depends on E
+only through Λ ∝ √E (L_t, τg, θ, σt are E-free; checked against `evaluate()` to
+rtol 1e-12). The `a0 ≥ h` guard **never fired** in any variant, so it is
+untested by data rather than confirmed by it. Full tables in methods §4.
+
+**Gotcha for any space-time run:** the zarr `location` axis is
+59 280 = 6 565 unique clusters repeated **9× at stride 6 565** (verified
+byte-identical). Dedupe with `.isel(location=slice(0, 6565))`; counts computed
+without it are inflated 9-fold. Chunking is `(25, 126, 85)`, so loading one
+timestep costs the same as loading all 126 in its time chunk — iterate over
+location blocks with all times loaded, not over timesteps.
+
 ## Run tests
 
 ```bash
 pytest tests/ -v
 ```
 
-All 34 tests in `test_arrest_indices.py` must pass. Do not modify tolerances to make
+All 42 tests in `test_arrest_indices.py`, the 12 in
+`test_snowpack_features.py` and the 72 in `test_layered_slab.py` must pass
+(126 total). Do not modify tolerances to make
 failing tests pass — fix the underlying formula or inputs.
 
 ## Key physical constraints
@@ -187,4 +297,4 @@ Lateral *distance* extent is separately set by `estimate_cross_slope_width()`
 ## Commit style
 
 - Short imperative subject line
-- End with: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`
+- End with: `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`

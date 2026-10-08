@@ -5,6 +5,7 @@ Provides:
     geojson_to_mask()         Rasterize a GeoJSON polygon to a boolean mask
     assign_cluster_groups()   Assign clusters to release / adjacent / reference groups
     split_wl_slab()           Identify WL / slab boundary via grain type
+    element_thickness()       Per-element thickness dz from the z coordinate
     profile_features()        Per-cluster WL/slab/stability features (from xarray Dataset)
     compute_meloche_features() Meloche et al. (2025) crack-arrest parameters
 
@@ -25,6 +26,7 @@ import rasterio.features
 import rasterio.transform as rt
 
 from release_areas import config
+from release_areas import arrest_indices as _ai
 from release_areas.arrest_indices import evaluate as _ai_evaluate
 
 # Slab/weak-layer material constants (config is the source of truth)
@@ -189,6 +191,43 @@ def split_wl_slab(grain_type, z):
     return slab_mask, wl_mask, interface_z
 
 
+def element_thickness(z, hs, valid):
+    """
+    Per-element thickness dz (m), in the original element index order.
+
+    SNOWPACK's `z` is depth below the snow surface, negative downward, and is
+    exactly `height_above_ground - HS` (verified to machine precision against
+    the zarr `height` variable). So sorting by z and differencing gives each
+    element's own thickness, with the basal element measured from the ground at
+    z = -HS. `np.sum(dz) == HS` exactly when no element is excluded.
+
+    Bulk slab properties must be weighted by dz: SNOWPACK element thicknesses
+    span a factor of ~10 within a single profile (3-38 mm measured on the
+    Little Professor domain), so an unweighted element mean over-weights thin
+    layers. Likewise a layer's thickness is the SUM of its elements' dz, not
+    the span of their z, which omits the lowest element entirely.
+
+    valid : boolean mask of elements to include; dz is NaN elsewhere.
+    """
+    z = np.asarray(z, dtype=float)
+    dz = np.full(z.shape, np.nan)
+    idx = np.where(valid)[0]
+    if len(idx) == 0 or not np.isfinite(hs):
+        return dz
+    order = idx[np.argsort(z[idx])]
+    dz[order] = np.diff(z[order], prepend=-float(hs))
+    return dz
+
+
+def thickness_weighted_mean(values, mask, dz):
+    """Thickness-weighted mean of `values` over `mask`; NaN if no usable element."""
+    values = np.asarray(values, dtype=float)
+    m = mask & np.isfinite(values) & np.isfinite(dz) & (dz > 0)
+    if not m.any():
+        return np.nan
+    return float(np.sum(values[m] * dz[m]) / np.sum(dz[m]))
+
+
 # ---------------------------------------------------------------------------
 # Per-cluster feature extraction (requires xarray Dataset slice from zarr)
 # ---------------------------------------------------------------------------
@@ -227,6 +266,11 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
     if -interface_z < min_depth_cm / 100.0:
         return result
 
+    # Element thicknesses, used to weight every bulk mean and to sum layer
+    # thicknesses. See element_thickness() for why a plain element mean and a
+    # z-span are both wrong.
+    dz = element_thickness(z, hs, ok)
+
     near_interface = ok & (np.abs(z - interface_z) <= 0.05)
     for var in ('sk38', 'ssi', 'sn38', 'stab_deformation_rate'):
         try:
@@ -237,13 +281,12 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
             result[f'min_{var}'] = np.nan
 
     if slab_m.any():
-        for var, agg in [('density',       np.nanmean),
-                         ('hand_hardness', np.nanmean),
-                         ('grain_size',    np.nanmean)]:
+        # Thickness-weighted, so that rho * h is the true slab load per unit
+        # area and E/sigma_t see a mass-weighted bulk density.
+        for var in ('density', 'hand_hardness', 'grain_size'):
             try:
-                v    = ds_t_loc[var].values.ravel()
-                vals = v[slab_m & ~np.isnan(v)]
-                result[f'slab_{var}'] = float(agg(vals)) if len(vals) else np.nan
+                v = ds_t_loc[var].values.ravel()
+                result[f'slab_{var}'] = thickness_weighted_mean(v, slab_m & ok, dz)
             except Exception:
                 result[f'slab_{var}'] = np.nan
 
@@ -260,11 +303,20 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
 
         gt_slab_all = np.round(gt[slab_m & ok]).astype(int)
         z_slab_all  = z[slab_m & ok]
-        is_crust    = (gt_slab_all // 100) >= 7
+        dz_slab_all = dz[slab_m & ok]
+        # MF (7xx) and IF (8xx) only. The previous `>= 7` also caught FCxr
+        # (9xx, rounding facets), which is 29% of slab thickness here and
+        # present in every profile — so every crust flag in the domain was a
+        # false positive (zero MF/IF elements exist in it). Faceted layers are
+        # handled by the layered sigma_t aggregation instead.
+        is_crust    = np.isin(gt_slab_all // 100, (7, 8))
         result['has_crust']       = bool(is_crust.any())
         result['n_crust_layers']  = int(is_crust.sum())
+        # Sum of crust element thicknesses. The z span this replaced both
+        # omitted the lowest crust element and counted any non-crust elements
+        # sandwiched between two crusts.
         result['crust_thickness'] = float(
-            z_slab_all[is_crust].max() - z_slab_all[is_crust].min()
+            np.nansum(dz_slab_all[is_crust])
         ) if is_crust.any() else 0.0
         near_iface = np.abs(z_slab_all - interface_z) <= 0.10
         result['crust_at_interface'] = bool((is_crust & near_iface).any())
@@ -279,20 +331,32 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
             result[k] = np.nan
 
     if wl_m.any():
-        for var, agg in [('shear_strength', np.nanmean),
-                         ('grain_size',     np.nanmean),
-                         ('density',        np.nanmean),
-                         ('hand_hardness',  np.nanmean)]:
+        # wl_shear_strength (tau_p) is deliberately left as a plain element
+        # mean. Thickness-weighting it would be a modelling change, not a bug
+        # fix: a crack runs in the weakest sublayer, so the governing value is
+        # arguably the minimum rather than any mean, and tau_p cascades into
+        # theta, tau_p_star and the trigger ranking. Decide that separately.
+        for var in ('grain_size', 'density', 'hand_hardness'):
             try:
-                v    = ds_t_loc[var].values.ravel()
-                vals = v[wl_m & ~np.isnan(v)]
-                result[f'wl_{var}'] = float(agg(vals)) if len(vals) else np.nan
+                v = ds_t_loc[var].values.ravel()
+                result[f'wl_{var}'] = thickness_weighted_mean(v, wl_m & ok, dz)
             except Exception:
                 result[f'wl_{var}'] = np.nan
 
+        try:
+            v    = ds_t_loc['shear_strength'].values.ravel()
+            vals = v[wl_m & ~np.isnan(v)]
+            result['wl_shear_strength'] = float(np.nanmean(vals)) if len(vals) else np.nan
+        except Exception:
+            result['wl_shear_strength'] = np.nan
+
         wl_z = z[wl_m & ok]
         result['wl_burial_depth'] = float(-wl_z.max())              if len(wl_z) else np.nan
-        result['wl_thickness']    = float(wl_z.max() - wl_z.min())  if len(wl_z) else np.nan
+        # D_wl is the SUM of the WL elements' thicknesses. The z span this
+        # replaced omitted the basal element, undercounting D_wl by a median
+        # 23% on the Jan 18 2026 Little Professor profiles, which propagates as
+        # Lambda ~ sqrt(D_wl) and K_wl = G_wl / D_wl.
+        result['wl_thickness']    = float(np.nansum(dz[wl_m & ok])) if len(wl_z) else np.nan
         result['interface_z']     = float(interface_z)
 
         try:
@@ -313,13 +377,11 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
     tau_p = result.get('wl_shear_strength', np.nan)
 
     if all(not np.isnan(v) for v in [rho, h_m, D_wl, tau_p]) and D_wl > 0:
-        # Slab elastic modulus — power-law hand-fit to the van Herwijnen et al.
-        # (2016) range: ~2 MPa at rho=200, ~4 MPa at 300, ~6 MPa at 350 kg/m3.
-        # Not a published regression; see methods §4.
-        E_slab  = (rho / 300.0)**2.5 * 4.0e6
-        # Slab tensile strength — ~5 kPa at rho=300, inside the Meloche
-        # 2-10 kPa range. Same caveat.
-        sigma_t = (rho / 300.0)**1.4 * 5.0e3
+        # Bulk relations, unchanged — _ai.slab_modulus / slab_tensile_strength
+        # are the same expressions, lifted out so the per-layer path can reuse
+        # them. See their docstrings for the (absent) provenance.
+        E_slab  = float(_ai.slab_modulus(rho))
+        sigma_t = float(_ai.slab_tensile_strength(rho))
         E_prime = E_slab / (1.0 - nu**2)
         K_wl    = G_WL / D_wl
         Lambda  = float(np.sqrt(E_prime * h_m / K_wl))
@@ -330,7 +392,46 @@ def profile_features(ds_t_loc, min_depth_cm: float) -> dict:
     else:
         for k in ('E_slab', 'sigma_t', 'Lambda', 'K_wl'):
             result[k] = np.nan
+
+    # --- Layered-slab aggregation (added alongside; nothing above changes) ---
+    result.update(_slab_layer_aggregate(ds_t_loc, slab_m & ok, dz, z))
     return result
+
+
+def _slab_layer_aggregate(ds_t_loc, slab_sel, dz, z) -> dict:
+    """Per-layer sigma_t/E aggregation over the slab. All-NaN if unavailable.
+
+    Needs sphericity and dendricity per element; datasets without them degrade
+    to NaN rather than failing, so existing outputs are unaffected.
+    """
+    keys = ('E_eff', 'sigma_t_mean', 'sigma_t_wl', 'f_mean_weighted',
+            'wl_ctrl_index', 'wl_ctrl_depth', 'wl_ctrl_thickness',
+            'sigma_t_ligament', 'K_Ic_ligament', 'sigma_t_lig_intact',
+            'a0_ligament', 'l_ch_ligament', 'n_slab_layers', 'n_rho_clamped')
+    try:
+        rho = ds_t_loc['density'].values.ravel()[slab_sel]
+        sp  = ds_t_loc['sphericity'].values.ravel()[slab_sel]
+        dd  = ds_t_loc['dendricity'].values.ravel()[slab_sel]
+    except Exception:
+        return {k: np.nan for k in keys}
+    try:
+        gsz = ds_t_loc['grain_size'].values.ravel()[slab_sel]
+    except Exception:
+        gsz = None   # schweizer2004 needs d_max; it degrades to NaN without it
+    return _ai.aggregate_slab(
+        rho, dz[slab_sel], sp, dd,
+        a=config.FACET_STRENGTH_FACTOR, sp_ref=config.FACET_SP_REF,
+        depth_i=-z[slab_sel],
+        K_Ic=config.SLAB_K_IC if config.USE_LIGAMENT_BOUND else None,
+        k_ic_relation=(config.K_IC_RELATION if config.USE_LIGAMENT_BOUND
+                       and config.SLAB_K_IC is None else None),
+        ligament_model=config.LIGAMENT_MODEL,
+        grain_size_i=gsz, dmax_factor=config.DMAX_FACTOR,
+        e_relation=config.E_RELATION,
+        e_relations_extra=config.E_RELATIONS_EXTRA,
+        k_ic_variants=(config.LIGAMENT_VARIANTS
+                       if config.USE_LIGAMENT_BOUND else ()),
+        self_consistent_a0=config.SELF_CONSISTENT_A0)
 
 
 # ---------------------------------------------------------------------------
@@ -480,11 +581,17 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
         Pi1         = tau_g_ai / denom
         Pi2         = Pi1 * np.sqrt(sigma_t / tau_g_ai)
 
+        # Eq. 20 again under the two layered sigma_t bounds, alongside (never
+        # replacing) A_ca_brittle. Only sigma_t and E change: k_f and tau_g
+        # come from the bulk slab density, so they are shared.
+        layered = _layered_arrest(row, ai, tau_g_ai, theta, psi_deg, h_m)
+
         # A_ca_elastic (JGR Eq. 19) is deliberately not emitted: the paper
         # gives it as a proportionality with no published constant, so an
         # absolute length would be uncalibrated. Pi1_elastic carries the
         # same information in dimensionless form.
         rows_out.append({
+            **layered,
             'cluster_id':   cid,
             'slope_angle':  psi_deg,
             'tau_g':        tau_g_ai,
@@ -515,3 +622,82 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
     if not rows_out:
         return pd.DataFrame()
     return pd.DataFrame(rows_out).set_index('cluster_id')
+
+
+_LAYERED_KEYS = ('E_eff', 'sigma_t_mean', 'sigma_t_wl', 'sigma_t_ligament',
+                 'f_mean_weighted', 'n_slab_layers', 'wl_ctrl_index',
+                 'wl_ctrl_depth', 'wl_ctrl_thickness', 'K_Ic_ligament',
+                 'sigma_t_lig_intact', 'a0_ligament', 'l_ch_ligament')
+
+
+def _layered_arrest(row, ai, tau_g, theta, psi_deg, h_m) -> dict:
+    """Eq. 20 under the layered sigma_t bounds. NaN when the columns are absent.
+
+    Carries the aggregation columns through from profile_features and adds
+    Lambda_eff (from E_eff) plus A_ca under each bound and their ratio.
+    """
+    # Every layered column present on the row, including the __<variant> and
+    # __<E relation> suffixes, so new variants need no change here.
+    keys = set(_LAYERED_KEYS)
+    try:
+        keys |= {k for k in row.index
+                 if any(k.startswith(p + '__') for p in _LAYERED_KEYS)
+                 or k.startswith('E_eff__')}
+    except AttributeError:
+        pass
+    out = {k: _nan_get(row, k) for k in keys}
+    out.update({k: np.nan for k in
+                ('Lambda_eff', 'A_ca_mean', 'A_ca_wl', 'A_ca_ratio',
+                 'A_ca_ligament')})
+
+    E_eff = out['E_eff']
+    D_wl  = _nan_get(row, 'wl_thickness')
+    if not (np.isfinite(E_eff) and np.isfinite(D_wl) and D_wl > 0
+            and np.isfinite(h_m) and np.isfinite(theta) and theta > 0):
+        return out
+
+    rho_bulk = _nan_get(row, 'slab_density')
+    out['Lambda_eff'] = float(_ai.elastic_length(E_eff, h_m, D_wl, G_WL, NU))
+    k_f = float(_ai.tension_gradient(rho_bulk, psi_deg, config.PHI_DEG))
+
+    def _a_ca(sigma_t, Lam):
+        if not (np.isfinite(sigma_t) and sigma_t > 0 and np.isfinite(Lam)):
+            return np.nan
+        L_t = float(_ai.tensile_length(sigma_t, k_f))
+        if not np.isfinite(L_t):
+            return np.nan
+        return float(_ai.arrest_length(
+            tau_g, theta, Lam, sigma_t, config.DELTA, L_t)[0])
+
+    Lam = out['Lambda_eff']
+    out['A_ca_mean'] = _a_ca(out['sigma_t_mean'], Lam)
+    out['A_ca_wl'] = _a_ca(out['sigma_t_wl'], Lam)
+    out['A_ca_ligament'] = _a_ca(out['sigma_t_ligament'], Lam)
+
+    # Per-variant ligament bounds.
+    for k in [k for k in out if k.startswith('sigma_t_ligament__')]:
+        out['A_ca_ligament__' + k.split('__', 1)[1]] = _a_ca(out[k], Lam)
+
+    # Alternative E relations: only Lambda changes, A_ca ~ E^-0.5.
+    for k in [k for k in out if k.startswith('E_eff__')]:
+        name = k.split('__', 1)[1]
+        if not np.isfinite(out[k]):
+            continue
+        L2 = float(_ai.elastic_length(out[k], h_m, D_wl, G_WL, NU))
+        out['Lambda_eff__' + name] = L2
+        out['A_ca_mean__' + name] = _a_ca(out['sigma_t_mean'], L2)
+
+    if np.isfinite(out['A_ca_mean']) and np.isfinite(out['A_ca_wl']) \
+            and out['A_ca_wl'] > 0:
+        out['A_ca_ratio'] = out['A_ca_mean'] / out['A_ca_wl']
+    return out
+
+
+def _nan_get(row, key):
+    v = row.get(key, np.nan)
+    if isinstance(v, pd.Series):
+        v = v.iloc[0] if len(v) else np.nan
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return np.nan

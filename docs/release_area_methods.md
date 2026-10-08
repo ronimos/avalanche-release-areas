@@ -279,8 +279,8 @@ ingredient is spatial τp variability on the flanks rather than slab mechanics.
 | Input | Source | Note |
 |---|---|---|
 | ρ, h | layer-weighted slab density and thickness above weak layer | check slope-normal vs vertical |
-| E | density parameterization | `profile_features`: E = (ρ/300)^2.5 · 4 MPa |
-| σt | density parameterization | `profile_features`: σt = (ρ/300)^1.4 · 5 kPa |
+| E | `arrest_indices.slab_modulus(rho, relation)` | default `vanherwijnen2016`: E = 0.93 ρ^2.8 Pa. Option `project_fit`: E = (ρ/300)^2.5 · 4 MPa |
+| σt | `arrest_indices.slab_tensile_strength` | σt = (ρ/300)^1.4 · 5 kPa — in-house hand-fit, no published source |
 | τp0 | shear strength output (`.pro` code 0508, to verify) | In `compute_meloche_features()`, each cluster's own `wl_shear_strength` is used as τp0 — a per-cluster index: "if crack initiates here, how far must WL strength rise to arrest it?" |
 | G_wl, D_wl | weak-layer modulus and thickness | paper used 0.2 MPa, 0.04 m |
 | θ | k-nearest-neighbour gradient of τp between cluster centroids (§5) | needs a spatial field, not one profile. `arrest_indices.shear_gradient` (transect polyfit) is a separate helper the pipeline does not use |
@@ -288,18 +288,201 @@ ingredient is spatial τp variability on the flanks rather than slab mechanics.
 
 Without θ, the energy framework still gives τp* and R0 = G_c(τp0)/G_slab, a per-profile index of how far weak-layer strength must rise before a crack stops.
 
-**Caveat on E and σt.** Both density parameterisations are hardcoded in
-`profile_features`. Provenance, recovered from the upstream avachain source:
-E is a power-law **hand-fit to the range** reported by van Herwijnen et al.
-(2016) — ~2 MPa at ρ = 200, ~4 MPa at 300, ~6 MPa at 350 kg m⁻³ — and σt
-anchors on ~5 kPa at ρ = 300, inside the Meloche 2–10 kPa range.
+**Provenance of E and σt.** Both are selectable in
+`arrest_indices`; each option cites its own source.
 
-Neither is a published regression: the exponents (2.5, 1.4) were chosen to pass
-through those anchor points, so they carry no fitted uncertainty and have not
-been validated outside 200–350 kg m⁻³. Jan 18 slab densities (264–332 kg m⁻³,
+| Option | Formula | Source |
+|---|---|---|
+| `vanherwijnen2016` (**default**) | E = 0.93 ρ^2.8 Pa | van Herwijnen et al. (2016) *J. Glaciol.* 62(236) 997–1007, **Eq. 8**; fitted to PST field measurements over ~100–350 kg m⁻³, Spearman r = 0.69, NRMSE 13% |
+| `project_fit` | E = (ρ/300)^2.5 · 4 MPa | **this project, not a publication.** A hand-fit through ~2/4/6 MPa at ρ = 200/300/350 — i.e. through the *range* van Herwijnen et al. report, not their regression |
+| σt (only option) | σt = (ρ/300)^1.4 · 5 kPa | **this project, not a publication.** Anchored at ~5 kPa at ρ = 300, inside the 2–10 kPa Meloche et al. (2025) swept. Neither paper publishes a σt(ρ) regression |
+
+`project_fit` sits a factor **1.63–2.19 below** the van Herwijnen regression over
+ρ = 150–400 (2.01× at ρ = 300). This matters for the calibration of `C_FIT`:
+Meloche et al. (2025) Table 1 fixes ρ = 250 kg m⁻³ in all four campaigns and
+treats E as a *swept constant* — 4 MPa, or 2-4-6 MPa in the pure-elastic and
+brittle-slab campaigns — so there is **no E(ρ) relation in Meloche at all**.
+`C_FIT = 0.045` was fitted at E = 4 MPa, ρ = 250, σt = 6 kPa. At that density
+`project_fit` gives 2.54 MPa (0.63× the calibration value, and since
+A_ca ∝ E^−0.5 that inflates A_ca by 1.26×), whereas `vanherwijnen2016` gives
+4.82 MPa (1.20×). The default is the one consistent with the calibration point.
+
+The σt exponent 1.4 was chosen to pass through its anchor point, so it carries
+no fitted uncertainty and has not been validated outside 200–350 kg m⁻³. Jan 18 slab densities (264–332 kg m⁻³,
 §6) sit inside that window, but Λ ∝ √E and G_slab ∝ σt²/E, so both frameworks
 inherit this choice directly. Replacing these with a cited regression is the
 single highest-value improvement to the input chain.
+
+### Parameter generation chain
+
+Every slab parameter below is derived from the SNOWPACK element arrays in one
+pass through `snowpack_features.profile_features`, which delegates the
+layer-resolved part to `arrest_indices.aggregate_slab`. The steps are given in
+the order they execute, because each consumes the previous one's output.
+
+**(a) Element thickness.** SNOWPACK's `z` is exactly `height_above_ground − HS`,
+so `np.diff` of sorted `z` with the ground prepended at `−HS` recovers each
+element's own thickness, and those thicknesses sum to `HS`. This was verified to
+machine precision against the zarr `height` variable (`element_thickness()`).
+Element thicknesses span 3–38 mm within a single profile, so the distinction
+below is not cosmetic.
+
+**(b) Thickness weighting.** All bulk slab means are thickness-weighted,
+`⟨x⟩ = Σ x_i dz_i / Σ dz_i`, so that ρh is the true slab load per unit area and
+E and σt see a mass-weighted bulk density. A plain element mean over-weights
+thin layers; measured on Jan 18 the correction is ρ ×1.013, E ×1.033,
+τg ×1.004. A layer's thickness is likewise the **sum of its elements' dz**, not
+the span of their `z`, which silently omits the basal element — `wl_thickness`
+had been undercounting D_wl by a median 23% (p95 49%). Because the basal weak
+layer starts at the ground, `D_wl == hs − slab_thickness` exactly, which is a
+useful patch for pre-fix CSVs. Since Λ ∝ √D_wl, Λ rose ×1.13 and A_ca fell
+×0.86; end-to-end on Jan 18 the best IoU moved **0.667 → 0.636**. The fit got
+*worse* — an inflated A_ca had been partly compensating an under-covered crown.
+That is not grounds to revert a verified identity, and not a licence to re-tune
+anything else.
+
+`wl_shear_strength` (τp) is deliberately left a plain element mean: weighting it
+is a modelling choice, not a bug fix, because a crack runs in the weakest
+sublayer and τp cascades into θ, τp* and the trigger ranking.
+
+**(c) Per-layer tensile strength and facetedness.** Each element gets
+σt,i = σt,RG(ρ_i)·(1 − a f_i) (`layer_tensile_strength`), where σt,RG is the
+project σt(ρ) above and f ∈ [0,1] is a facetedness index,
+f = 1 − sphericity for non-dendritic layers and 0 otherwise (`facetedness`).
+The knockdown a = `FACET_STRENGTH_FACTOR` = 0.5 encodes the observation that
+faceted snow is roughly half as strong in tension as rounded snow at equal
+density (Jamieson & Johnston 1990). Using a continuous f rather than a grain-type
+switch means neighbouring cells cannot step discontinuously across a grain-class
+boundary. Our rounded-grain layers sit at sphericity ≈ 0.86, so they still carry
+f ≈ 0.14 and lose ~7% of σt; `FACET_SP_REF` (default `None`) optionally anchors
+f so that typical RG keeps the unmodified σt,RG(ρ).
+
+**(d) Slab-scale aggregation.** Two reductions, both over the slab elements:
+
+| Quantity | Rule | Reading |
+|---|---|---|
+| `E_eff` | Σ E_i dz_i / h (`effective_modulus`) | iso-strain (Voigt) slope-parallel stiffness |
+| `sigma_t_mean` | Σ σt,i dz_i / h (`tensile_strength_mean`) | full load redistribution across layers — an upper bound |
+| `sigma_t_wl` | E_eff · minᵢ(σt,i/E_i) (`tensile_strength_weakest_link`) | weakest link: the slab fails when the lowest-failure-strain layer reaches its own strength, every layer at the common iso-strain value |
+
+`sigma_t_wl ≤ sigma_t_mean` always, with equality only when σt,i/E_i is uniform.
+The argmin index is retained as the **controlling layer** (`wl_ctrl_index`,
+`wl_ctrl_depth`, `wl_ctrl_thickness`) and is what the ligament bound in (f)
+treats as a crack.
+
+**(e) Fracture toughness K_Ic(ρ).** Selectable, each option citing its own
+measurement (`k_ic`, `K_IC_RELATIONS`). Neither available relation is a
+slab-tension measurement at avalanche scale, which is the central caveat on
+everything in (f).
+
+| Option | Formula | Source and caveat |
+|---|---|---|
+| `schweizer2004` (**default**) | K_Ic = A₄ (ρ/ρ_ice)^exp / √d_max, A₄ = 0.35 kPa·m | Schweizer, Michot & Kirchner (2004) *Ann. Glaciol.* 38, 1–8, **Eq. 8** (r = 0.98), which the paper states replaces its own Eqs. 5 and 6 by folding in the d_max^(−1/2) dependence — the latter consistent with ice (Petrenko & Whitworth 1999). Notched cantilever beams in a cold laboratory. **The printed Eq. 8 exponent is 1.9**; we default to 2.0 (`SCH2004_EXP`; the abstract says "about 2"), which is 11% low at ρ = 300 and 17% low at ρ = 150. `SCH2004_EXP_PAPER` restores 1.9. |
+| `kirchner2000` | K_Ic = 7.84 (ρ/ρ_ice)^2.3 kPa·m^0.5 | Kirchner et al. (2000) *Phil. Mag. A* 80(5). **Treat as a LOWER BOUND**: these are *apparent* toughnesses from small cantilever beams, so they carry the small-specimen size effect, and a slab-scale crack is far larger than the beams. |
+| `borstad2013` | — | **gated, raises `NotImplementedError`.** Bronze OA at Wiley only, no repository copy, so the regression has never been sourced and quoted back. |
+
+d_max = `DMAX_FACTOR` · grain size, **both in metres**. Our zarr `grain_size` is
+already in m (median 5.9 × 10⁻⁴); raw SNOWPACK `.pro` output is in mm.
+
+*Validity range and clamping.* `schweizer2004` was fitted over 80–300 kg m⁻³
+(series C–F, chosen to resolve the density dependence, span 80–250; the abstract
+quotes 100–300 across all series A–F) — below our median slab density. `k_ic()`
+therefore clamps ρ into the fitted range **for the K_Ic evaluation only**, so a
+single out-of-range element cannot poison a thickness-weighted ligament; density
+is not modified anywhere else, and `clamp=False` restores NaN-outside-range.
+`k_ic_n_clamped()` reports the count per profile. Over the full space-time run
+this clamps a median **46 of 81** slab layers (p95 147), 94.3% of slabs having at
+least one clamped layer, so K_Ic is effectively saturated across most of the
+slab. `kirchner2000`, fitted to 540 kg m⁻³, clamps almost nothing (median 0,
+14.8% of slabs).
+
+**(f) Ligament (edge-crack) bound — hypothesis, not a published criterion.**
+The controlling layer from (d) is treated as a crack of length a = its own
+thickness in a slab of thickness h loaded in slope-parallel tension; K_Ic and
+σt come from the **intact** layers (thickness-weighted over the slab minus that
+layer). The El Haddad short-crack correction is the default:
+
+    sigma_c = K_Ic / (F(a/h) sqrt(pi (a + a0))),   a0 = (K_Ic / (F sigma_t_lig))^2 / pi
+
+after El Haddad, Topper & Smith (1979), with a₀ the intrinsic flaw size that
+reconciles the LEFM and strength limits. `F(a/h)` is the single-edge-notch
+tension factor of Tada, Paris & Irwin (polynomial, valid to a/h ≤ 0.6), or the
+Feddersen secant form for an embedded crack. Using the **same** `F(a/h)` in both
+places makes the a → 0 limit recover `sigma_t_lig` exactly, with no iteration
+(asserted to rel 1e-9 in `tests/test_layered_slab.py`).
+`self_consistent_a0=True` instead solves a₀ at F(a₀/h) iteratively and is kept
+only as an option — its a → 0 limit is merely σt·F(a₀/h)/F(0).
+`model='lefm'` gives the uncorrected form, which overshoots `sigma_t_lig` on
+thin controlling layers. A bound is withheld (NaN) when a₀ ≥ h: the intrinsic
+flaw then exceeds the slab and the LEFM geometry is void.
+
+**Not validated.** No K_Ic for snow slabs in tension has been verified against a
+source we hold, and the ligament bound has never been fed into the BFS or scored
+against an observed crown.
+
+### Measured parameter statistics (full space-time run)
+
+One pass over the Little Professor domain, all clusters × all 501 six-hourly
+steps (2025-11-26 → 2026-03-31) = 3 289 065 profiles, of which 2 169 737
+(66.0%) resolved a slab. Medians with [p5, p95]. Nothing here is a validation —
+these are the generated parameter distributions.
+
+Independent of the K_Ic option:
+
+| Quantity | Full space-time | Jan 18 2026 12:00 |
+|---|---|---|
+| slab thickness h (m) | 1.808 [0.767, 4.460] | 1.629 [0.806, 4.661] |
+| slab density ρ (kg m⁻³) | 313.7 [190.5, 369.4] | 327.0 [290.8, 346.5] |
+| slab layers per profile | 81 [36, 198] | 72 [39, 208] |
+| σt_mean / σt(bulk) | 0.875 [0.770, 0.985] | 0.860 [0.748, 0.953] |
+| σt_wl / σt_mean | 0.650 [0.514, 0.739] | 0.676 [0.568, 0.747] |
+| f (thickness-weighted) | 0.256 [0.042, 0.480] | 0.296 [0.100, 0.526] |
+| controlling layer a (m) | 0.0213 (p95 0.0335) | 0.0209 (p95 0.0335) |
+| controlling a/h | 0.0118 (p95 0.0288) | 0.0130 (p95 0.0270) |
+
+So the layered reduction costs ~12% of bulk σt through (c)+(d-mean), and the
+weakest-link reading costs a further ~35%.
+
+E relation, and the A_ca consequence. A_ca depends on E **only** through
+Λ ∝ √E — L_t, τg, θ and σt are all E-free — so the ratio below is an exact
+identity, not a fit (confirmed against `evaluate()` to rtol 1e-12):
+
+| | Full space-time | Jan 18 |
+|---|---|---|
+| E_eff `vanherwijnen2016` (Pa) | 1.015e7 [2.64e6, 1.51e7] | 1.111e7 [8.22e6, 1.29e7] |
+| E_eff `project_fit` (Pa) | 4.863e6 [1.45e6, 6.97e6] | 5.288e6 [4.04e6, 6.04e6] |
+| E_pf / E_vh | 0.479 [0.463, 0.549] | 0.476 [0.469, 0.490] |
+| **A_ca(vh2016) / A_ca(project_fit) = √(E_pf/E_vh)** | **0.692 [0.680, 0.741]** | **0.690 [0.685, 0.700]** |
+
+Adopting the cited `vanherwijnen2016` default therefore shortens A_ca by ~31%
+domain-wide relative to the old in-house fit.
+
+Ligament bound, per K_Ic option, over the full space-time run:
+
+| | `schweizer2004` d=1·gsz (default) | `schweizer2004` d=2·gsz | `kirchner2000` (lower bound) |
+|---|---|---|---|
+| K_Ic (Pa·m^0.5) | 1299 [786, 1677] | 919 [556, 1186] | 706 [228, 994] |
+| a₀ intrinsic flaw (m) | 0.0243 [0.0152, 0.0414] | 0.0122 [0.0076, 0.0207] | 0.0070 [0.0024, 0.0092] |
+| l_ch = (K_Ic/σt)² (m) | 0.0812 (p95 0.139) | 0.0406 (p95 0.070) | 0.0237 (p95 0.029) |
+| σ_c bound (Pa) | 3622 [2015, 5272] | 3141 [1738, 4689] | 2677 [942, 4452] |
+| σ_c / σt_lig_intact | 0.816 [0.670, 0.924] | 0.706 [0.538, 0.863] | 0.595 [0.356, 0.810] |
+| σ_c / σt(bulk) | 0.708 [0.563, 0.847] | 0.614 [0.455, 0.782] | 0.512 [0.326, 0.719] |
+| clamped layers / profile | 46 [0, 147] | 46 [0, 147] | 0 [0, 2] |
+| clamped fraction of slab | 0.584 | 0.584 | 0.000 |
+| slabs with ≥1 clamped layer | 94.3% | 94.3% | 14.8% |
+
+σt_lig_intact is K_Ic-independent: 4530 Pa [2447, 6373]. Doubling `DMAX_FACTOR`
+leaves the clamping untouched (it is a density test) but scales K_Ic by
+1/√2 ≈ 0.707, which is visible row for row.
+
+The `a₀ ≥ h` withholding guard **never fired** — 0 of 2 169 737 slabs, in any
+variant — so on this domain the LEFM geometry was never voided, and the guard is
+currently untested by data rather than validated by it.
+
+*Data note.* The zarr `location` axis is 59 280 = 6 565 unique clusters repeated
+9× at stride 6 565 (verified byte-identical for `density`, `grain_type` and `HS`
+at sampled clusters and timesteps). The run deduplicates to the 6 565 real
+clusters; count-based statistics computed without that step are inflated 9-fold.
 
 ### Building the feature CSVs from xsnow
 
@@ -326,8 +509,8 @@ The start zone is partitioned into spatial clusters via a pre-computed raster (`
 
 `profile_features()` identifies the basal weak layer by scanning upward from the snowpack base for the first continuous FC/DH grain sequence (grain-type codes 4xx and 5xx). Everything above the WL top is labelled the slab. The function returns:
 
-- **Slab**: density-weighted mean density (ρ), slope-normal thickness (h), Young's modulus E and tensile strength σt from density parameterisations, and dominant grain class.
-- **WL**: mean shear strength (τp), grain size, burial depth, and thickness (D_wl).
+- **Slab**: thickness-weighted mean density (ρ), slope-normal thickness (h), Young's modulus E and tensile strength σt from the density parameterisations of §4, dominant grain class, and the layer-resolved `E_eff` / `sigma_t_mean` / `sigma_t_wl` / ligament quantities of §4(d)–(f).
+- **WL**: mean shear strength (τp, a plain element mean by choice — §4(b)), grain size, burial depth, and thickness (D_wl, the sum of element thicknesses).
 - **Interface stability indices**: Sk38, SSI, SN38 and the deformation-rate index as the minimum over layers within 5 cm of the WL top. Critical cut length r_c is the mean over the **whole** weak layer, not the 5 cm band.
 - **Derived elastic quantities**: K_wl = G_wl / D_wl and Λ (upslope elastic length). G_slab is *not* computed here — it comes from `arrest_indices.evaluate()` via `compute_meloche_features`.
 
@@ -623,3 +806,10 @@ The BFS pipeline IoU is a polygon-level IoU: the modelled GeoJSON polygon is int
 - McClung, D. M., & Schweizer, J. (2006). Fracture toughness of dry snow slab avalanches from field measurements. *JGR Earth Surface*. https://doi.org/10.1029/2005JF000403
 - Broberg, K. B. (1989). The near-tip field at high crack velocities. In *Structural Integrity*, Springer.
 - van Herwijnen, A., Gaume, J., Bair, E. H., Reuter, B., Birkeland, K. W., & Schweizer, J. (2016). Estimating the effective elastic modulus and specific fracture energy of snowpack layers from field experiments. *Journal of Glaciology*, 62(236), 997–1007.
+- Schweizer, J., Michot, G., & Kirchner, H. O. K. (2004). On the fracture toughness of snow. *Annals of Glaciology*, 38, 1–8. https://doi.org/10.3189/172756404781814906 — source of the default K_Ic(ρ), Eq. 8.
+- Kirchner, H. O. K., Michot, G., & Schweizer, J. (2000). Fracture toughness of snow in tension. *Philosophical Magazine A*, 80(5). — the `kirchner2000` lower bound.
+- Jamieson, J. B., & Johnston, C. D. (1990). In-situ tensile tests of snowpack layers. *Journal of Glaciology*, 36(122), 102–106. — basis for the facet tensile knockdown `FACET_STRENGTH_FACTOR`.
+- El Haddad, M. H., Topper, T. H., & Smith, K. N. (1979). Prediction of non-propagating cracks. *Engineering Fracture Mechanics*, 11(3), 573–584. — the short-crack correction and intrinsic flaw size a₀.
+- Tada, H., Paris, P. C., & Irwin, G. R. (2000). *The Stress Analysis of Cracks Handbook* (3rd ed.). ASME. — single-edge-notch tension F(a/h) and the Feddersen secant form.
+- Petrenko, V. F., & Whitworth, R. W. (1999). *Physics of Ice*. Oxford University Press. — the d_max^(−1/2) toughness dependence in ice that Schweizer et al. (2004) invoke.
+- Borstad, C. P., & McClung, D. M. (2013). Sensitivity analysis of a fracture mechanical model of snow slab avalanche release. *(not sourced — bronze OA only; the `borstad2013` K_Ic option is gated.)*

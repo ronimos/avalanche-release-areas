@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from release_areas import config
+from release_areas.arrest_indices import arrest_length
 
 # Re-exported for backwards compatibility; config is the source of truth.
 STAUCHWALL_DEG     = config.STAUCHWALL_DEG
@@ -682,11 +683,16 @@ def propagate_crack(
                         tg    = tau_g_nbr
                         sig_t = nbr_props.get('sigma_t', np.nan)
                         L_t   = nbr_props.get('L_t',     np.nan)
-                        if (not any(np.isnan(v) for v in (Lam, tg, sig_t, L_t))
+                        # np.isfinite, not isnan: tensile_length returns inf
+                        # when k_f <= 0, and arrest_indices.evaluate() gates
+                        # Eq. 20 on isfinite(L_t) for the same reason.
+                        if (all(np.isfinite(v) for v in (Lam, tg, sig_t, L_t))
                                 and tg > 0.0):
-                            Pi     = tg / (theta_dir * Lam
-                                           * np.sqrt(1.0 + MELOCHE_DELTA))
-                            A_ca_d = L_t * Pi * np.sqrt(sig_t / tg)
+                            # Eq. 20 with the directional theta, from the one
+                            # implementation in arrest_indices.
+                            A_ca_d, _ = arrest_length(
+                                tg, theta_dir, Lam, sig_t,
+                                delta=MELOCHE_DELTA, L_t=L_t)
                             if A_ca_d < dist_cn:
                                 return False, 'meloche_arrest'
             return True, 'propagated'

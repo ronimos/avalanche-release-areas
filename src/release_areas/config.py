@@ -58,6 +58,49 @@ THETA_VALID_MIN = 20.0      # Pa/m
 THETA_VALID_MAX = 5000.0    # Pa/m
 
 # -----------------------------------------------------------------------
+# Layered-slab aggregation of sigma_t and E (arrest_indices.aggregate_slab)
+# -----------------------------------------------------------------------
+# Faceted snow is about half as strong in tension as rounded snow at equal
+# density (Jamieson & Johnston 1990), applied continuously via
+# f = 1 - sphericity so neighbouring cells cannot step across a grain-type
+# boundary.
+FACET_STRENGTH_FACTOR = 0.5
+
+# None = f is 1 - sphericity outright. Our rounded-grain layers sit at
+# sphericity ~0.86, so they carry f ~0.14 and lose ~7% of sigma_t; measured
+# over the Jan 18 slabs this lowers sigma_t_mean to 0.85x the bulk value.
+# Setting this to 0.86 instead anchors f so typical RG keeps the unmodified
+# sigma_t,RG(rho) and only genuinely faceted layers are penalised.
+FACET_SP_REF = None
+
+# Slab elastic modulus relation. 'vanherwijnen2016' is E = 0.93 rho^2.8 Pa
+# (van Herwijnen et al. 2016, J. Glaciol. 62(236), Eq. 8). 'project_fit' is the
+# older in-house hand-fit 4 MPa (rho/300)^2.5, kept as an option.
+E_RELATION         = 'vanherwijnen2016'
+E_RELATIONS_EXTRA  = ('project_fit',)   # also emitted as E_eff__<name>
+
+# Edge-crack (ligament) bound — HYPOTHESIS. Computed and emitted, but never
+# fed into the BFS and never validated against an observed crown.
+USE_LIGAMENT_BOUND = True
+# SLAB_K_IC overrides the relation with a constant (Pa m^0.5); None = use
+# K_IC_RELATION. 'schweizer2004' and 'kirchner2000' are implemented; only
+# 'borstad2013' is still gated, its published equation never having been
+# sourced and quoted back for checking.
+SLAB_K_IC          = None
+K_IC_RELATION      = 'schweizer2004'
+LIGAMENT_MODEL     = 'elhaddad'   # or 'lefm' for the uncorrected form
+SELF_CONSISTENT_A0 = False        # True evaluates a0 at F(a0/h) iteratively
+DMAX_FACTOR        = 1.0          # d_max = DMAX_FACTOR * grain_size (both m)
+
+# Extra ligament bounds computed in the same pass, as
+# (label, K_Ic relation, dmax_factor) -> keys suffixed __<label>.
+LIGAMENT_VARIANTS = (
+    ('kirchner2000',     'kirchner2000',  1.0),
+    ('schweizer2004_d1', 'schweizer2004', 1.0),
+    ('schweizer2004_d2', 'schweizer2004', 2.0),
+)
+
+# -----------------------------------------------------------------------
 # Trigger selection filter chain (generate_scenarios)
 # -----------------------------------------------------------------------
 MIN_TAU_G          = 40.0   # Pa; minimum gravitational driving shear stress
