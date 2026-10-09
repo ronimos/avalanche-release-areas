@@ -10,11 +10,14 @@ Two invariants matter here, and both are about *direction*, not magnitude:
      polygon rotates with it.
 """
 import numpy as np
+import pandas as pd
 import pytest
 from affine import Affine
 
+from release_areas import config
 from release_areas.release_geometry import (
     compute_slope_aspect,
+    estimate_cross_slope_width,
     find_stauchwall,
     pixel_to_utm,
     project_along_aspect,
@@ -142,3 +145,109 @@ class TestProjectAlongAspect:
         dr = -np.cos(np.radians(a)) * 20.0
         dc = np.sin(np.radians(a)) * 20.0
         assert dem[int(r0 + dr), int(c0 + dc)] < dem[r0, c0]
+
+
+# -----------------------------------------------------------------------
+# Cross-slope theta sampling
+# -----------------------------------------------------------------------
+
+ASPECT = 114.0   # ESE, as on the Little Professor start zone
+
+
+def _cross_slope_scene(tau_of_offset, aspect_deg=ASPECT, theta_down=3.0):
+    """Build a cluster map with the trigger at centre, six neighbours on the
+    cross-slope axis and six on the fall line, all 10/20/30 m out.
+
+    tau_of_offset(de, dn) -> tau_p, so a test can make tau_p vary along
+    exactly one of the two axes.
+    """
+    a = np.radians(aspect_deg)
+    fall  = np.array([np.sin(a),  np.cos(a)])      # (east, north)
+    cross = np.array([-fall[1], fall[0]])
+
+    n = 121
+    cluster_map = np.zeros((n, n), float)
+    r0 = c0 = n // 2
+    cluster_map[r0, c0] = 1
+    taus = {1: tau_of_offset(0.0, 0.0)}
+
+    cid = 2
+    for axis in (cross, fall):
+        for s in (-30.0, -20.0, -10.0, 10.0, 20.0, 30.0):
+            de, dn = axis * s
+            # east -> +col, north -> -row
+            r, c = int(round(r0 - dn)), int(round(c0 + de))
+            cluster_map[r, c] = cid
+            taus[cid] = tau_of_offset(de, dn)
+            cid += 1
+
+    df = pd.DataFrame({
+        'theta': theta_down,
+        'tau_p': [taus[k] for k in sorted(taus)],
+    }, index=sorted(taus))
+    df.index.name = 'cluster_id'
+    T_ = Affine(1.0, 0.0, 400000.0, 0.0, -1.0, 4000000.0)
+    return cluster_map, df, T_, fall, cross
+
+
+class TestEstimateCrossSlopeWidth:
+    def test_fall_line_neighbours_are_excluded(self):
+        """tau_p varying only along the fall line must leave theta_cross at 0.
+
+        The row/col selection used before picked neighbours a mean 30 deg off
+        the cross axis -- some within 1.2 deg of the fall line -- so a purely
+        along-slope gradient leaked into theta_cross.
+        """
+        a = np.radians(ASPECT)
+        fall = np.array([np.sin(a), np.cos(a)])
+        cmap, df, T_, fall, cross = _cross_slope_scene(
+            lambda de, dn: 1000.0 + 50.0 * (np.array([de, dn]) @ fall))
+        got = estimate_cross_slope_width(
+            1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+            aspect_deg=ASPECT)
+        # theta_cross == 0 -> fall back to the aspect cap, not a leaked gradient
+        assert got == pytest.approx(40.0 * config.GAUME_ASPECT_CAP)
+
+    def test_cross_slope_gradient_is_recovered_exactly(self):
+        g = 2.0          # Pa/m along the cross axis
+        theta_down = 3.0
+        a = np.radians(ASPECT)
+        fall = np.array([np.sin(a), np.cos(a)])
+        cross = np.array([-fall[1], fall[0]])
+        cmap, df, T_, _, _ = _cross_slope_scene(
+            lambda de, dn: 1000.0 + g * (np.array([de, dn]) @ cross),
+            theta_down=theta_down)
+        got = estimate_cross_slope_width(
+            1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+            aspect_deg=ASPECT)
+        # |dtau|/d == g on every cross-axis pair, so width_factor = theta_down/g
+        assert got == pytest.approx(40.0 * (theta_down / g), rel=0.02)
+
+    def test_no_aspect_means_no_theta_widening(self):
+        cmap, df, T_, _, _ = _cross_slope_scene(lambda de, dn: 1000.0)
+        got = estimate_cross_slope_width(
+            1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+            aspect_deg=None)
+        assert got == pytest.approx(40.0)
+
+    def test_width_factor_is_capped(self):
+        cmap, df, T_, _, _ = _cross_slope_scene(
+            lambda de, dn: 1000.0, theta_down=1e6)
+        got = estimate_cross_slope_width(
+            1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+            aspect_deg=ASPECT)
+        assert got == pytest.approx(40.0 * config.GAUME_ASPECT_CAP)
+
+    def test_both_flanks_contribute(self):
+        """The sector test uses |d.cross|, so neighbours on either flank count."""
+        a = np.radians(ASPECT)
+        fall = np.array([np.sin(a), np.cos(a)])
+        cross = np.array([-fall[1], fall[0]])
+        # antisymmetric field: +g one flank, -g the other, |gradient| = g both ways
+        cmap, df, T_, _, _ = _cross_slope_scene(
+            lambda de, dn: 1000.0 + 2.0 * abs(np.array([de, dn]) @ cross),
+            theta_down=3.0)
+        got = estimate_cross_slope_width(
+            1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+            aspect_deg=ASPECT)
+        assert got == pytest.approx(40.0 * (3.0 / 2.0), rel=0.02)

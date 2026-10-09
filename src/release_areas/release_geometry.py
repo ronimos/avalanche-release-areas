@@ -267,16 +267,33 @@ def estimate_cross_slope_width(
         snap_features: Optional[pd.DataFrame] = None,
         pixel_index: Optional[dict] = None,
         n_lateral_neighbors: int = 6,
-        gaume_aspect_cap: float = GAUME_ASPECT_CAP) -> float:
+        gaume_aspect_cap: float = GAUME_ASPECT_CAP,
+        aspect_deg: Optional[float] = None) -> float:
     """Estimate cross-slope release width (m) using Gaume et al. (2015) / θ.
 
-    Falls back to A_ca whenever θ or τp is unavailable.
+    Falls back to A_ca whenever θ, τp or `aspect_deg` is unavailable.
+
+    `aspect_deg` is the downslope bearing at the trigger and is what defines
+    "cross-slope": the lateral sample is restricted to a ±THETA_CROSS_SECTOR_DEG
+    sector about the cross axis (aspect ± 90°), on either flank. Without it
+    there is no cross-slope direction to sample along, so the θ widening is
+    skipped rather than taken along the raster axes.
 
     This sets the lateral *distance cap*; the cross-slope Λ continuity test
     lives in propagate_crack via directional_lambda(). Both are mode III
     concerns and should be revisited together when Λ_III lands.
+
+    Caveat: `theta_down` is read from the meloche CSV, where θ is the
+    *isotropic* mean over the k nearest clusters in any direction, so the
+    theta_down/theta_cross ratio pairs an undirected numerator with a
+    directional denominator. Making the numerator along-slope means changing
+    compute_meloche_features and regenerating the CSVs, which moves Π₁ and the
+    whole trigger ranking — a separate decision, see methods §3.
     """
     if meloche_df.empty or 'theta' not in meloche_df.columns:
+        return A_ca
+
+    if aspect_deg is None or np.isnan(aspect_deg):
         return A_ca
 
     try:
@@ -301,25 +318,41 @@ def estimate_cross_slope_width(
     if trigger_cluster_id not in centroids:
         return A_ca
     t_row, t_col = centroids[trigger_cluster_id]
+    t_x, t_y = pixel_to_utm(int(round(t_row)), int(round(t_col)), transform)
 
-    # Clusters roughly abeam of the trigger: within 50 px along-slope, at
-    # least 5 px across-slope so the pair actually spans a lateral distance.
-    lateral = sorted(
-        ((cid, abs(c_col - t_col)) for cid, (c_row, c_col) in centroids.items()
-         if cid != trigger_cluster_id
-         and abs(c_row - t_row) < 50 and abs(c_col - t_col) > 5),
-        key=lambda x: x[1])[:n_lateral_neighbors]
+    # Clusters abeam of the trigger, in the map frame: separation within
+    # [MIN_SEP, MAX_SEP] metres and pointing within THETA_CROSS_SECTOR_DEG of
+    # the cross axis. |d·cross| so both flanks qualify.
+    asp_rad  = np.radians(float(aspect_deg))
+    fall_x, fall_y   = np.sin(asp_rad), np.cos(asp_rad)
+    cross_x, cross_y = -fall_y, fall_x
+    cos_min = np.cos(np.radians(config.THETA_CROSS_SECTOR_DEG))
+
+    lateral = []
+    for cid, (c_row, c_col) in centroids.items():
+        if cid == trigger_cluster_id:
+            continue
+        c_x, c_y = pixel_to_utm(int(round(c_row)), int(round(c_col)), transform)
+        dx, dy   = c_x - t_x, c_y - t_y
+        dist_m   = float(np.hypot(dx, dy))
+        if not (config.THETA_CROSS_MIN_SEP_M <= dist_m
+                <= config.THETA_CROSS_MAX_SEP_M):
+            continue
+        if abs(dx * cross_x + dy * cross_y) / dist_m < cos_min:
+            continue
+        lateral.append((cid, dist_m))
+
+    lateral.sort(key=lambda t: t[1])
+    lateral = lateral[:n_lateral_neighbors]
     if not lateral:
         return A_ca
 
-    px_m = abs(transform.a) if transform is not None else 1.0
     theta_cross_vals = []
-    for cid, dist_px in lateral:
+    for cid, dist_m in lateral:
         if cid not in tau_frame.index:
             continue
         tau_lat = float(pd.to_numeric(
             first_scalar(tau_frame.loc[cid, tau_col]), errors='coerce'))
-        dist_m = dist_px * px_m
         if not np.isnan(tau_lat) and dist_m > 0:
             theta_cross_vals.append(abs(tau_trigger - tau_lat) / dist_m)
 
@@ -467,6 +500,7 @@ def make_release_polygon_2d(
     half_width  = estimate_cross_slope_width(
         trigger_cluster_id, A_ca, meloche_df, cluster_map, transform,
         snap_features=snap_features, pixel_index=pixel_index,
+        aspect_deg=t_aspect,
     ) * size_factor / 2.0
 
     asp_rad = np.radians(t_aspect)
@@ -589,7 +623,8 @@ def propagate_crack(
     d_lat_gaume = estimate_cross_slope_width(
         trigger_cluster_id, A_ca_base,
         meloche_df, cluster_map, transform,
-        snap_features=snap_features, pixel_index=pixel_index) * size_factor
+        snap_features=snap_features, pixel_index=pixel_index,
+        aspect_deg=t_aspect) * size_factor
 
     # Mode III crack-speed cap. Mode III cannot exceed c_s where upslope runs
     # supershear at ~1.6 c_s; the slower crack builds slab tension faster per

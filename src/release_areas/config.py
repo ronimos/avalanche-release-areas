@@ -130,6 +130,17 @@ LAMBDA_RISE_FACTOR    = 0.30   # fractional stiffening arrest threshold
 LAMBDA_CROSS_DROP_FACTOR = 0.20
 LAMBDA_CROSS_RISE_FACTOR = 0.30
 
+# Cross-slope θ sampling in estimate_cross_slope_width(). The lateral sample
+# has to sit near the true cross-slope axis (aspect ± 90°). Selecting it by
+# raster row/col instead — "same row ± 50 px, column offset > 5 px" — silently
+# assumes the fall line runs north-south. On the Jan 18 ESE start zone
+# (aspect 113-120°, cross axis 23-30°) that put the chosen neighbours a mean
+# 30° off the cross axis, with some of them within 1.2° of the fall line, so
+# theta_cross was contaminated by the along-slope gradient.
+THETA_CROSS_SECTOR_DEG = 30.0  # ± half-angle accepted about the cross axis
+THETA_CROSS_MIN_SEP_M  = 5.0   # m; closer pairs make |Δτp|/d noise-dominated
+THETA_CROSS_MAX_SEP_M  = 50.0  # m; beyond this the pair is not abeam
+
 THICKNESS_DROP_FACTOR = 0.20   # fractional thinning arrest threshold
 THICKNESS_RISE_FACTOR = 0.30   # fractional thickening arrest threshold
 
