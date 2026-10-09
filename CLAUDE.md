@@ -82,9 +82,18 @@ Expected output (verified 2026-10-09, reference CSVs):
 
 The reference CSVs are regenerated with the current defaults by
 `examples/regenerate_jan18_reference_csvs.py` (needs avachain's interpreter for
-zarr). To reproduce the **pre-2026-10-09** numbers, point both `--*-csv` flags
-at the `_v1` pair: 493 → 408 → 204 → 102, triggers
-[2859, 5656, 2858, 348, 1068], best IoU 0.639 / 0.669, mean area/observed 0.77.
+zarr). **Do not delete the `_v1` pair**: that script reads it to pin the cluster
+set and `group` labels, and it cannot be regenerated — it came from arithmetic
+three commits back (0 of 3540 rows satisfy the post-fix D_wl identity).
+
+Pointing both `--*-csv` flags at the `_v1` pair under **current** code gives
+493 → 408 → 204 → 102, triggers [2859, 5656, 2858, 348, 1068], best IoU
+**0.626** at the default cap and **0.669** at `--max-clusters 2000`, mean
+area/observed 0.70 / 0.77. The default-cap figure was 0.639 before the
+cross-slope θ sampling fix of 2026-10-09; it moved because those polygons are
+cap-bound, so a changed `d_lat` alters which clusters fill the budget. The
+`--max-clusters 2000` figure is unchanged. Old CSVs do **not** mean old
+numbers — the geometry fixes live in the code, not the data.
 
 Note `generate_scenarios` reads the CSVs and never calls `profile_features`, so
 changing `THETA_ESTIMATOR` or any feature-generation default has **no effect on

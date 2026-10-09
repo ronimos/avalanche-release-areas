@@ -557,9 +557,17 @@ LIG_OUT_DIR=/path/to/keep /home/ron/avachain/.venv/bin/python -I \
 
 To reproduce any row of the §6 2×2, point `--features-csv` / `--meloche-csv` at
 the `_v1` or reference pair and set `config.THETA_ESTIMATOR` before
-regenerating the meloche CSV. `generate_scenarios` reads the CSVs and never
-calls `profile_features`, so changing a feature-generation default has no
-effect on a scenario run until the CSVs are rebuilt.
+regenerating the meloche CSV. For the E-isolation row ("weighting only"), also
+set `config.E_RELATION = 'project_fit'` and rerun
+`regenerate_jan18_reference_csvs.py` under a different output name — E feeds
+`E_slab`, so it changes the *features* CSV, not just the meloche one. Note the
+A_ca consequence of the E choice needs no re-run at all: it is the exact
+identity √(E_pf/E_vh) (§4), and the reference features CSV already carries
+`E_eff__project_fit` alongside `E_eff`.
+
+`generate_scenarios` reads the CSVs and never calls `profile_features`, so
+changing a feature-generation default has no effect on a scenario run until the
+CSVs are rebuilt.
 
 ---
 
