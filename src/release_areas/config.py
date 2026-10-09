@@ -45,6 +45,29 @@ TAU_G_FEATURE_FLOOR = 50.0  # Pa; below this the arrest scaling laws are not
                             # paper does give.
 THETA_MIN          = 1e-6   # Pa/m; θ below this is treated as no usable gradient
 
+# How θ is estimated from the per-cluster τp field. See methods §5, "θ is a
+# function of the lag it is measured at".
+#   'knn'        mean |Δτp|/d over the K_NEIGHBORS nearest cluster centroids.
+#                This is the shipped behaviour and what every committed CSV and
+#                every published number was generated with.
+#   'plane_fit'  local least-squares plane through τp over all centroids within
+#                THETA_FIT_RADIUS_M, θ = |∇τp|. Estimates the slope-scale ramp
+#                that Meloche's θ represents, instead of the local noise.
+#
+# Measured on Jan 18: start-zone clusters are 3.0 m across and the k = 6
+# neighbourhood averages 3.3 m, so 'knn' samples θ inside the 0.5-10 m band the
+# paper treats as local noise. The τp variogram gives θ(d) = 3.87 + 72/d Pa/m,
+# i.e. at 3.3 m θ is 15% slope-scale trend and 85% local noise. A_ca ∝ 1/θ, so
+# the two estimators differ by ~3.4x in A_ca.
+#
+# Default is 'knn': switching moves θ, hence Π₁, hence the trigger ranking and
+# the whole filter chain, and the shipped CSVs predate the option. Any switch
+# must be argued from the propagation scale the scaling law was calibrated at
+# (L_SS), never from Jan 18 IoU.
+THETA_ESTIMATOR          = 'knn'   # 'knn' | 'plane_fit'
+THETA_FIT_RADIUS_M       = L_SS    # m; neighbourhood radius for 'plane_fit'
+THETA_FIT_MIN_NEIGHBOURS = 8       # minimum centroids in radius, else θ = NaN
+
 # Validity range of the arrest scaling laws in θ, from Meloche et al. (2025).
 # These are the only quantitative propagation thresholds the paper gives:
 #   p.12 "Shear strength gradients of more than 20 Pa m-1 were needed to obtain

@@ -435,6 +435,99 @@ def _slab_layer_aggregate(ds_t_loc, slab_sel, dz, z) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Spatial shear gradient θ
+# ---------------------------------------------------------------------------
+
+def theta_knn(tau_p_arr, indices, distances, px_m) -> np.ndarray:
+    """θ (Pa/m) as the mean |Δτp|/d over each cluster's k nearest centroids.
+
+    `indices`/`distances` come from a k-NN query on *pixel* centroids with the
+    cluster itself in column 0, so column 0 is dropped and `px_m` converts the
+    separations to metres.
+
+    This samples θ at whatever lag the cluster spacing happens to be — 3.3 m on
+    Jan 18, where θ is 85% local noise. See `theta_plane_fit` and methods §5.
+    """
+    tau_p_arr = np.asarray(tau_p_arr, float)
+    out = np.full(len(tau_p_arr), np.nan)
+    for i in range(len(tau_p_arr)):
+        tau_i = tau_p_arr[i]
+        if np.isnan(tau_i):
+            continue
+        vals = []
+        for j, d in zip(indices[i][1:], distances[i][1:] * px_m):
+            if d < 1e-6:
+                continue
+            tau_j = tau_p_arr[j]
+            if not np.isnan(tau_j):
+                vals.append(abs(tau_i - tau_j) / d)
+        if vals:
+            out[i] = float(np.mean(vals))
+    return out
+
+
+def theta_plane_fit(east_m, north_m, tau_p_arr,
+                    radius_m: float = None,
+                    min_neighbours: int = None) -> tuple:
+    """θ (Pa/m) as |∇τp| from a local least-squares plane through τp.
+
+    Fits τp ≈ a·E + b·N + c over every cluster centroid within `radius_m` and
+    returns (theta, grad_east, grad_north) with theta = hypot(a, b).
+
+    Averaging over a neighbourhood of radius ≈ L_ss suppresses the local noise
+    that dominates a short-lag difference estimator and leaves the slope-scale
+    ramp, which is the quantity Meloche et al.'s θ represents (their
+    heterogeneity is "a linear increase of the weak layer strength"). The
+    gradient vector is returned as well, so an along-slope/cross-slope split
+    becomes possible without a second estimator.
+
+    θ is NaN where fewer than `min_neighbours` centroids carry τp inside the
+    radius, or where they are too collinear to define a plane.
+    """
+    if radius_m is None:
+        radius_m = config.THETA_FIT_RADIUS_M
+    if min_neighbours is None:
+        min_neighbours = config.THETA_FIT_MIN_NEIGHBOURS
+
+    east_m = np.asarray(east_m, float)
+    north_m = np.asarray(north_m, float)
+    tau_p_arr = np.asarray(tau_p_arr, float)
+    n = len(tau_p_arr)
+    theta = np.full(n, np.nan)
+    g_e = np.full(n, np.nan)
+    g_n = np.full(n, np.nan)
+
+    ok = ~np.isnan(tau_p_arr)
+    if ok.sum() < min_neighbours:
+        return theta, g_e, g_n
+
+    from sklearn.neighbors import NearestNeighbors
+    pts = np.column_stack([east_m[ok], north_m[ok]])
+    tau_ok = tau_p_arr[ok]
+    tree = NearestNeighbors(radius=radius_m, algorithm='ball_tree').fit(pts)
+    neigh = tree.radius_neighbors(np.column_stack([east_m, north_m]),
+                                  return_distance=False)
+
+    for i in range(n):
+        if np.isnan(tau_p_arr[i]):
+            continue
+        sel = neigh[i]
+        if len(sel) < min_neighbours:
+            continue
+        e = pts[sel, 0]
+        nn = pts[sel, 1]
+        A = np.column_stack([e - e.mean(), nn - nn.mean(), np.ones(len(sel))])
+        # rank < 3 means the neighbourhood is a point or a line: no plane.
+        coef, _, rank, _ = np.linalg.lstsq(A, tau_ok[sel], rcond=None)
+        if rank < 3:
+            continue
+        g_e[i], g_n[i] = float(coef[0]), float(coef[1])
+        theta[i] = float(np.hypot(coef[0], coef[1]))
+
+    return theta, g_e, g_n
+
+
+# ---------------------------------------------------------------------------
 # Meloche et al. (2025) crack-arrest parameters
 # ---------------------------------------------------------------------------
 
@@ -512,6 +605,23 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
                              algorithm='ball_tree').fit(cents)
     distances, indices = nbrs.kneighbors(cents)
 
+    # θ for every cluster up front, by the configured estimator. `cents` are
+    # pixel (row, col); row increases southward, so north = -row.
+    if config.THETA_ESTIMATOR == 'plane_fit':
+        theta_arr, theta_ge, theta_gn = theta_plane_fit(
+            east_m=cents[:, 1] * px_m, north_m=-cents[:, 0] * px_m,
+            tau_p_arr=tau_p_arr)
+    elif config.THETA_ESTIMATOR == 'knn':
+        theta_arr = theta_knn(tau_p_arr, indices, distances, px_m)
+        theta_ge = theta_gn = np.full(len(cids_arr), np.nan)
+    else:
+        raise ValueError(
+            f"config.THETA_ESTIMATOR must be 'knn' or 'plane_fit', "
+            f"got {config.THETA_ESTIMATOR!r}")
+    theta_by_cid = {int(c): theta_arr[i] for i, c in enumerate(cids_arr)}
+    theta_vec_by_cid = {int(c): (theta_ge[i], theta_gn[i])
+                        for i, c in enumerate(cids_arr)}
+
     rows_out = []
     for i, cid in enumerate(cids_arr):
         if cid not in features.index:
@@ -544,18 +654,7 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
                              'note': 'tau_g below valid range for scaling law'})
             continue
 
-        # Distances come back in pixels; px_m converts them so theta is Pa/m.
-        neighbor_idx  = indices[i][1:]
-        neighbor_dist = distances[i][1:] * px_m
-        theta_vals = []
-        for j, d in zip(neighbor_idx, neighbor_dist):
-            if d < 1e-6:
-                continue
-            tau_j = tau_p_arr[j]
-            if not np.isnan(tau_j):
-                theta_vals.append(abs(tau_p - tau_j) / d)
-
-        theta = float(np.mean(theta_vals)) if theta_vals else np.nan
+        theta = float(theta_by_cid.get(int(cid), np.nan))
         if np.isnan(theta) or theta < config.THETA_MIN:
             rows_out.append({'cluster_id': cid, 'tau_g': tau_g_guard,
                              'theta': theta, 'slope_angle': psi_deg})
@@ -596,6 +695,9 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
             'slope_angle':  psi_deg,
             'tau_g':        tau_g_ai,
             'theta':        theta,
+            # NaN under the 'knn' estimator, which yields no gradient vector.
+            'theta_grad_east':  theta_vec_by_cid.get(int(cid), (np.nan,))[0],
+            'theta_grad_north': theta_vec_by_cid.get(int(cid), (np.nan, np.nan))[1],
             'tau_p':        tau_p,
             'Pi1_elastic':  Pi1,
             'Pi2_brittle':  Pi2,
