@@ -7,6 +7,13 @@ to the two CSVs consumed by generate_scenarios:
     all_start_zone_features_<DATE>.csv   — per-cluster WL/slab features
     meloche_features_all_<DATE>.csv      — per-cluster arrest indices (Π₁, A_ca, θ, …)
 
+ILLUSTRATIVE ONLY — the paths below are placeholders and do not exist. It writes
+to OUT_DIR, which defaults to a scratch directory and deliberately NOT to
+data/little_prof/features: those are the committed reference CSVs, and this
+script uses a different MIN_DEPTH_CM and does not pin the cluster set or the
+`group` labels, so it would not reproduce them. To regenerate the reference
+pair, use examples/regenerate_jan18_reference_csvs.py instead.
+
 Run from the avalanche-release-areas repo root after editing the five paths at the top.
 
 Requirements (not in release-areas pyproject.toml; installed separately in avachain env):
@@ -33,7 +40,8 @@ PRO_DIR     = Path("/home/snowpath/avachain/pro/little_prof")   # cluster_*.pro 
 ZARR_PATH   = Path("/home/snowpath/avachain/zarr/little_prof")  # zarr store (faster)
 CLUSTER_MAP = Path("data/little_prof/spatial/cluster_map.tif")
 DEM_PATH    = Path("data/little_prof/dem_1m.tif")
-OUT_DIR     = Path("data/little_prof/features")
+# NOT data/little_prof/features — see the module docstring.
+OUT_DIR     = Path("outputs/xsnow_example_features")
 
 EVENT_DATE  = pd.Timestamp("2026-01-18 12:00")   # noon on the analysis date
 
@@ -130,7 +138,11 @@ with rasterio.open(DEM_PATH) as src:
 # compute_meloche_features() adds:
 #   slope_angle   — per-cluster mean slope from DEM (degrees)
 #   tau_g         — gravitational shear stress (Pa)
-#   theta         — WL shear-strength gradient to k=6 nearest neighbours (Pa/m)
+#   theta         — WL shear-strength gradient (Pa/m), by config.THETA_ESTIMATOR:
+#                   'plane_fit' (default) fits a plane to τp within L_ss;
+#                   'knn' takes the mean |Δτp|/d over k=6 nearest neighbours
+#   theta_grad_east / theta_grad_north — the θ gradient vector ('plane_fit' only)
+#   Lambda_cross  — cross-slope (mode III) elastic length (m)
 #   Pi1_elastic   — Π₁ = τ_g / (θ Λ √(1+δ))
 #   Pi2_brittle   — Π₂ = Π₁ √(σ_t/τ_g)
 #   Lambda        — upslope elastic length (m)

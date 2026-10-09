@@ -267,8 +267,10 @@ This change is **inert on the default Jan 18 configuration** — IoU is
 bit-identical — because `d_lat = min(gaume_width, A_ca · 0.712)` and the mode
 III speed cap binds on all 5 triggers, so the Gaume width is not what sets
 lateral extent. It matters only with `USE_MODE3_SPEED_CAP = False` or where the
-cap does not bind. Worth remembering that the Gaume path is effectively dormant
-on this event.
+cap does not bind. Measured on the `_v1` pair with the cap off, `d_lat` becomes
+the Gaume width (39/34/34/112/20 m) and best IoU is 0.646, against 0.669 with
+the cap on. Worth remembering that the Gaume path is effectively dormant on
+this event.
 
 **Do not pick the estimator by Jan 18 IoU.** Changing θ moves Π₁, hence the
 trigger ranking and the whole filter chain. Argue it from the propagation scale

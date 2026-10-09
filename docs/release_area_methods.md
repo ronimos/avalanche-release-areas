@@ -498,6 +498,16 @@ Ligament bound, per K_Ic option, over the full space-time run:
 leaves the clamping untouched (it is a density test) but scales K_Ic by
 1/√2 ≈ 0.707, which is visible row for row.
 
+**These `schweizer2004` rows predate the exponent change of 2026-10-09**, and
+are the only numbers in this document that do. They were generated with
+`SCH2004_EXP = 2.0`; the default is now the paper's printed 1.9
+(`SCH2004_EXP_ROUND` reproduces them). Expect the K_Ic, a₀, l_ch and σ_c rows to
+rise by ~11% at ρ = 300 and more at lower density; the `kirchner2000` column and
+every K_Ic-independent row above are unaffected, as is the clamping, which is a
+density test. Nothing downstream of these columns moves either way — `k_ic()`
+reaches only the ligament bound, which is never fed into the BFS. Re-run
+`examples/spacetime_ligament_pass.py` then `..._stats.py` to refresh them.
+
 The `a₀ ≥ h` withholding guard **never fired** — 0 of 2 169 737 slabs, in any
 variant — so on this domain the LEFM geometry was never voided, and the guard is
 currently untested by data rather than validated by it.
@@ -521,6 +531,35 @@ clusters; count-based statistics computed without that step are inflated 9-fold.
 | SSI, SN38, r_c | `ssi`, `sn38`, `critical_cut_length` | optional stability diagnostics |
 
 `profile_features()` finds the basal FC/DH weak layer, labels everything above it as the slab, and returns a flat dict per cluster. `compute_meloche_features()` adds the spatial θ gradient and the full Meloche index suite. Both functions are in `release_areas.snowpack_features`.
+
+### Reproducing the generated data
+
+All the physics lives in `src/release_areas`; everything in `examples/` is a
+thin driver over it, so none of these scripts carries a parameter of its own.
+They need xarray/zarr, which are **not** in this repo's venv — run them with
+avachain's interpreter, which also resolves `release_areas` to this working
+tree:
+
+| Script | Produces |
+|---|---|
+| `examples/regenerate_jan18_reference_csvs.py` | the committed reference CSV pair, from the current defaults. Pins the cluster set and `group` labels from `*_v1.csv` so only parameter generation varies. |
+| `examples/spacetime_ligament_pass.py` | one `.npz` per location block for the full space-time run (§4). `LIG_OUT_DIR` / `LIG_ZARR` override the paths; the default output is under `/tmp`. |
+| `examples/spacetime_ligament_stats.py` | the §4 "Measured parameter statistics" tables from those blocks. |
+| `examples/compute_indices_from_xsnow.py` | illustrative only — placeholder paths, and it deliberately does **not** write to `data/little_prof/features`. |
+
+```bash
+/home/ron/avachain/.venv/bin/python -I examples/regenerate_jan18_reference_csvs.py
+LIG_OUT_DIR=/path/to/keep /home/ron/avachain/.venv/bin/python -I \
+    examples/spacetime_ligament_pass.py 24       # ~3 min on 24 workers
+LIG_OUT_DIR=/path/to/keep /home/ron/avachain/.venv/bin/python -I \
+    examples/spacetime_ligament_stats.py
+```
+
+To reproduce any row of the §6 2×2, point `--features-csv` / `--meloche-csv` at
+the `_v1` or reference pair and set `config.THETA_ESTIMATOR` before
+regenerating the meloche CSV. `generate_scenarios` reads the CSVs and never
+calls `profile_features`, so changing a feature-generation default has no
+effect on a scenario run until the CSVs are rebuilt.
 
 ---
 
@@ -902,6 +941,17 @@ layer thicknesses + `vanherwijnen2016` E) and `config.THETA_ESTIMATOR`.
 Trigger-matched on the three triggers common to all four (348, 2859, 5656),
 mean IoU is 0.598 / 0.462 / 0.536 / **0.606**.
 
+The "features" factor bundles two corrections, separated on 2026-10-08 by a
+third CSV pair that applied the element weighting but forced E back to
+`project_fit`. At `knn` θ and four common triggers: pre-fix 0.667 best /
+0.574 mean, weighting only 0.646 / 0.554, weighting + `vanherwijnen2016`
+0.506 / 0.464. So of the loss incurred at `knn`, the element weighting is
+~0.02 IoU and the E relation ~0.09 — the E relation is roughly **4/5** of it,
+consistent with its larger A_ca factor (×0.69 against ×0.86). Π₁'s median gate
+fell 31.30 → 19.36 over the same change. Those runs predate the direction
+fixes, so they are not directly comparable to the table above; the ratio
+between them is the useful part.
+
 **The interaction is the result, not the ranking.** The corrections move A_ca
 in opposite directions — the D_wl fix ×0.86, `vanherwijnen2016` E ×0.69,
 `plane_fit` θ ×2.9 — so each one *alone* makes the fit worse and all three
@@ -954,6 +1004,38 @@ the paper's θ validity floor, which remains the strongest open objection to the
 3. Check whether R is constant across θ, σt, E, L_ss and δ. If it is, the energy-cap criterion holds in the simulated range.
 4. Compare the σt dependence of A_ca against Eq. 20.
 5. Repeat on the TARP cross-slope runs with `slab_energy_cap_cross` once a flank strength is chosen.
+
+### Open items carried forward
+
+Everything else from the 2026-10-08 working notes is now folded into the
+sections above; these are what remain open.
+
+1. **θ validity.** Under the `plane_fit` default, 97.2% of start-zone clusters
+   sit below `THETA_VALID_MIN` (20 Pa m⁻¹) — the scale at which Meloche et al.
+   report crack arrest inside a simulated PST. This is the strongest objection
+   to the θ-based arrest route as a whole, and it is *not* an argument for
+   reverting to `knn`, which only looked compliant because it was measuring
+   local noise (§5). Nothing resolves it on one event.
+2. **`tau_flank`** for the permissive half of the mode III energy cap is still
+   blocked on the Cam-Clay β ambiguity, so only the restrictive half of a
+   two-sided effect is implemented (§3).
+3. **Λ_III** awaits Gaume's antiplane formula; a constant Λ_III/Λ_II ratio
+   changes nothing, because the continuity gate is scale-invariant (§3).
+4. **`borstad2013`** stays gated behind `NotImplementedError` — bronze OA at
+   Wiley, no repository copy, so the regression has never been sourced.
+5. **Trigger-set stability.** The top-5 ranking is not stable against θ
+   (2858/1068 → 6191/5817 across the §6 2×2), because Sk38 ties at 2-3
+   significant figures decide places 3-5. The sharpest case was the 2026-10-08
+   v2 run, where an Sk38 tie at 0.75 put cluster 3020 in fifth place and that
+   scenario collapsed to 434 m² at IoU 0.061, dragging the all-five mean on its
+   own. Any comparison should be read trigger-matched, and a tie-break less
+   brittle than raw Sk38 ordering would be worth having.
+6. **avachain's `docs/TODO.md` has no entry for any of this work** — not the
+   element weighting, the selectable relations, the ligament bound, the
+   space-time run, the two direction fixes, nor the θ estimator. By convention
+   that is where release-area work is tracked.
+7. **The ligament bound is still never fed into the BFS**, so it has no IoU of
+   its own and the `a₀ ≥ h` guard remains untested by data (§4).
 
 ## 9. References
 
