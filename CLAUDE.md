@@ -74,11 +74,22 @@ Expected output (verified 2026-10-09, reference CSVs):
 - Start zone clusters with features: 1608
 - Filter chain, one count per stage: 490 (tau_g/slope/Sk38) → 406 (slab
   thickness) → 203 (elevation ≥ P50) → 102 (Pi1 ≥ median 45.81)
-- Top-5 triggers: [2859, 5656, 6191, 5817, 348]
+- Top-3 triggers: [2859, 5656, 6191] — Sk38 all 0.72, i.e. `N_TOP_TRIGGERS = 3`
+  cuts *inside* a three-way tie, so the selection is decided by tie ordering,
+  not by a margin
 - Best IoU vs observed crown: **0.669** at the default `--max-clusters 500`
-  (3 of 5 polygons are cap-bound), **0.677** at `--max-clusters 2000`
-- At `--max-clusters 2000`: mean IoU 0.574, mean area/observed **0.82**
-  against the 0.83 a perfect mask-limited model implies
+  (1 of 3 polygons is cap-bound), **0.677** at `--max-clusters 2000`
+- At `--max-clusters 2000`: mean IoU 0.562, mean area/observed 0.63
+
+`N_TOP_TRIGGERS` dropped 5 → 3 on 2026-10-09; five overlapping polygons made
+the comparison figure unreadable. Per-scenario geometry is **unchanged** — the
+three are bit-identical to the first three of the five-trigger run — but
+aggregates are not, because the dropped scenarios 5817 and 348 were the two
+largest (area ratios 1.03 and 1.20). **The mean area/observed 0.82 that matches
+the 0.83 mask-limited ceiling, and which the methods §6 2×2 uses as its scale
+check, is a five-trigger figure**: at three triggers it is 0.63. Reproduce the
+2×2 with `--n-triggers 5`. Previous five-trigger output for reference:
+[2859, 5656, 6191, 5817, 348], 3 of 5 cap-bound, mean IoU 0.574.
 
 The reference CSVs are regenerated with the current defaults by
 `examples/regenerate_jan18_reference_csvs.py` (needs avachain's interpreter for

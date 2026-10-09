@@ -861,7 +861,7 @@ comparison against R_FIT is not.
 
 ### BFS scenario pipeline results
 
-The BFS crack-propagation pipeline (`generate_scenarios.py`) selects top-5 trigger clusters by lowest Sk38 and builds a release polygon for each via flood-fill with the gates tabulated in §5. Observed crown polygon: `data/little_prof/boundaries/avalanche_release_area_20260118.geojson` (**6 934 m²**, reprojected from the CRS84 source mapping `20260118_avalanche_boundaries.geojson`).
+The BFS crack-propagation pipeline (`generate_scenarios.py`) selects the top `config.N_TOP_TRIGGERS` trigger clusters by lowest Sk38 (3 since 2026-10-09; 5 before) and builds a release polygon for each via flood-fill with the gates tabulated in §5. Observed crown polygon: `data/little_prof/boundaries/avalanche_release_area_20260118.geojson` (**6 934 m²**, reprojected from the CRS84 source mapping `20260118_avalanche_boundaries.geojson`).
 
 The earlier 4 550 m² crown was an older mapping of the same feature (IoU 0.638
 against the current one); all numbers below use the 6 934 m² polygon.
@@ -885,7 +885,7 @@ since Π₁ ∝ 1/θ. For the pre-2026-10-09 figures, use the `_v1` CSV pair:
 (An earlier revision of this table attributed 493 → 408 → 204 all to the first
 filter and reported 51 final candidates; both were wrong.)
 
-Top-5 scenarios at size_factor = 1.0, with the default safety cap
+Top-3 scenarios at size_factor = 1.0, with the default safety cap
 (`--max-clusters 500`). Depth is the mean `slab_thickness` inside the polygon;
 volume is the integral of that depth over the release area.
 
@@ -894,10 +894,8 @@ volume is the integral of that depth over the release area.
 | scenario_001 | 2859 | 0.72 | 54 | 5 168 | 1.56 | 5 455 | **0.669** ← best | yes |
 | scenario_002 | 5656 | 0.72 | 50 | 4 384 | 1.58 | 4 544 | 0.580 | no |
 | scenario_003 | 6191 | 0.72 | 40 | 3 112 | 1.68 | 2 758 | 0.429 | no |
-| scenario_004 | 5817 | 0.73 | 77 | 5 247 | 1.48 | 6 596 | 0.533 | yes |
-| scenario_005 | 348  | 0.75 | 92 | 5 273 | 1.47 | 6 525 | 0.531 | yes |
 
-**Summary:** observed 6 934 m² · modelled P50 5 168 m² · ratio 0.75 · best IoU 0.669 · mean IoU 0.548.
+**Summary:** observed 6 934 m² · modelled P50 4 384 m² · ratio 0.63 · best IoU 0.669 · mean IoU 0.559.
 
 Because 3 of the 5 polygons are cap-bound, these are not purely physical
 results. Letting the arrest criteria terminate the flood-fill
@@ -908,24 +906,33 @@ results. Letting the arrest criteria terminate the flood-fill
 | scenario_001 | 2859 | 53.7 | 5 591 | 1.57 | 5 644 | **0.677** ← best |
 | scenario_002 | 5656 | 50.1 | 4 384 | 1.58 | 4 544 | 0.580 |
 | scenario_003 | 6191 | 40.1 | 3 112 | 1.68 | 2 758 | 0.429 |
-| scenario_004 | 5817 | 77.3 | 7 174 | 1.52 | 7 887 | 0.623 |
-| scenario_005 | 348  | 92.3 | 8 336 | 1.46 | 9 228 | 0.560 |
 
-**Summary:** observed 6 934 m² · modelled P50 5 591 m² · ratio 0.81 · best IoU
-0.677 · mean IoU 0.574 · **mean area/observed 0.82**.
+**Summary:** observed 6 934 m² · modelled P50 4 384 m² · ratio 0.63 · best IoU
+0.677 · mean IoU 0.562 · mean area/observed 0.63.
 
-Uncapped, all five polygons overlap the observed crown (IoU 0.43–0.68) and the
-mean area ratio is 0.82 — against the **0.83** a perfect mask-limited model
-implies, since 17% of the crown lies outside the start-zone KML and the BFS
-hard-rejects outside it. That agreement is the independent *scale* check
-discussed in the 2×2 below; it is not an overlap metric and is the one place
-this configuration is clearly better than the alternatives. The spread in area
-(3 100–8 300 m²) reflects trigger location, since all five use
-size_factor = 1.0; scenario_003 (6191) is the weak one at 0.429.
+Uncapped, all three polygons overlap the observed crown (IoU 0.43–0.68), and
+each is individually smaller than the crown. scenario_003 (6191) is the weak
+one at 0.429.
 
-![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown. Coloured outlines: five modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
+**On the mean area ratio, and why it is not the 0.82 quoted in the 2×2 below.**
+`N_TOP_TRIGGERS` dropped 5 → 3 on 2026-10-09 (the figure was unreadable at
+five). Per-scenario geometry is unaffected — these three rows are bit-identical
+to the first three of the five-trigger run — but the *aggregate* is not, because
+the two dropped scenarios (5817 and 348) were the two largest, at area ratios
+1.03 and 1.20. Over five triggers the mean area/observed is **0.82**, which is
+the number that matches the **0.83** a perfect mask-limited model implies (17%
+of the crown lies outside the start-zone KML and the BFS hard-rejects outside
+it) and which the 2×2 below uses as its scale check. Over three it is 0.63.
+The 2×2 was run at `--n-triggers 5` and its figures should be read that way;
+reproduce it with that flag, not the current default.
 
-*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Regenerated 2026-10-09 from the reference CSVs with `--max-clusters 2000`, so it shows the uncapped table above — the default-cap run is cap-bound on 3 of 5 and is not a physical result. Plotted equal-aspect; before the 2026-10-09 fix the axes were `aspect='auto'`, which stretched east against north by 1.21× and made every bearing read off the figure wrong by −4.6°.*
+A further caution: at three triggers the cut falls *inside* a three-way Sk38
+tie at 0.72, so the selection is decided by tie ordering rather than by any
+margin — see §8 item 5.
+
+![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown. Coloured outlines: three modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
+
+*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Regenerated 2026-10-09 from the reference CSVs with `--max-clusters 2000` and the default three triggers, so it shows the uncapped table above — the default-cap run is cap-bound on 3 of 5 and is not a physical result. Plotted equal-aspect; before the 2026-10-09 fix the axes were `aspect='auto'`, which stretched east against north by 1.21× and made every bearing read off the figure wrong by −4.6°.*
 
 To reproduce:
 
@@ -956,6 +963,10 @@ Measured 2026-10-09, all four runs under identical code at
 `--max-clusters 2000`, nothing cap-bound. Two factors: the feature CSVs
 (pre-fix element means + `project_fit` E, vs thickness-weighted means + summed
 layer thicknesses + `vanherwijnen2016` E) and `config.THETA_ESTIMATOR`.
+
+Run at `--n-triggers 5`, the default at the time; the current default is 3.
+Use that flag to reproduce these rows — the per-scenario geometry is unchanged
+by the count, but every aggregate column below is a five-trigger mean.
 
 | features | θ | best IoU | mean IoU | mean area/obs | A_ca range (m) |
 |---|---|---|---|---|---|
@@ -1062,6 +1073,20 @@ sections above; these are what remain open.
    that is where release-area work is tracked.
 7. **The ligament bound is still never fed into the BFS**, so it has no IoU of
    its own and the `a₀ ≥ h` guard remains untested by data (§4).
+8. **Anisotropic BFS rings — to investigate.** As `propagate_crack` adds rings
+   to the flood-fill, grow roughly **1.6× further along-slope than cross-slope**
+   per ring, instead of growing isotropically and only clipping afterwards with
+   `d_up` / `d_down` / `d_lat`. The ratio is already in the model as
+   `MODE2_SPEED_RATIO`: mode II runs supershear at ~1.6 c_s while mode III caps
+   at c_s (Broberg 1989). If a ring represents one increment of crack-front
+   advance in *time*, the front should already be ~1.6× further along-slope when
+   it arrives, so the anisotropy belongs in the growth rather than only in a
+   terminal cap — at present the front shape is an artifact of cluster geometry.
+   Two things to settle first: whether this *replaces* the mode III speed cap or
+   composes with it (applying both double-counts the same 1.6), and that the cap
+   currently binds on every Jan 18 trigger and alone sets lateral extent. Judge
+   it against the observed crown's aspect (major axis 119°, L/W 3.51), which is
+   a sharper test than IoU, and do not tune the ratio to this event.
 
 ## 9. References
 

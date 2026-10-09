@@ -231,5 +231,11 @@ USE_MELOCHE_ARREST = False
 # -----------------------------------------------------------------------
 # Scenario sweep
 # -----------------------------------------------------------------------
-N_TOP_TRIGGERS   = 5       # number of trigger clusters to evaluate
+# Number of trigger clusters to evaluate. Dropped 5 → 3 on 2026-10-09: five
+# overlapping polygons made the comparison figure unreadable, and the two
+# dropped scenarios were the two worst-ranked by Sk38. Note the cut now lands
+# inside a three-way Sk38 tie at 0.72 (clusters 2859, 5656, 6191 on Jan 18), so
+# which three you get is decided by the ordering of a tie, not by a margin —
+# see methods §8 item 5. Override with --n-triggers.
+N_TOP_TRIGGERS   = 3
 SIZE_FACTORS     = [1.0]   # release size multipliers; one polygon per trigger
