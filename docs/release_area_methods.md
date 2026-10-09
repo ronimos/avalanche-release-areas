@@ -272,6 +272,17 @@ If the JGR attribution of lateral arrest to weak-layer heterogeneity is right,
 then neither Λ_III nor the speed cap is the dominant control, and the missing
 ingredient is spatial τp variability on the flanks rather than slab mechanics.
 
+Revised 2026-10-09: "spatial τp variability" turns out not to mean *adding*
+variability. θ is already sampled at 3.3 m and is already ~85% local noise,
+and our measured σ_local (69 Pa) is 7× below Appendix E's 500 Pa. The open
+item is the **scale** θ is evaluated at, not a missing random field — see §5,
+"θ is a function of the lag it is measured at".
+
+Note also that the lateral cap now depends on this doubly: since the
+cross-slope θ sampling fix of 2026-10-09, `theta_cross` is measured along the
+true cross axis, the Gaume width saturates at `GAUME_ASPECT_CAP` more often,
+and the mode III speed cap binds on all 5 Jan 18 triggers rather than 2.
+
 ---
 
 ## 4. Inputs from SNOWPACK
@@ -534,6 +545,98 @@ earlier revisions:
 
 Such clusters are *not dropped from the frame*; they appear as rows whose
 arrest-index columns are NaN.
+
+#### θ is a function of the lag it is measured at, and ours is ~85% noise
+
+Measured 2026-10-09 on the Jan 18 start zone (1 309 clusters carrying τp).
+This is a property of the estimator, not a tunable, and it was not known when
+the k = 6 neighbourhood was chosen.
+
+Start-zone clusters are **small**: median 7 px, equivalent diameter **3.0 m**,
+nearest-centroid spacing 2.1 m, and the mean distance to the k = 6 neighbours
+θ actually uses is **3.3 m**. So θ is sampled at 3.3 m — *inside* the 0.5–10 m
+correlation-length band Meloche et al. use for local noise in Appendix E, not
+at the slope scale.
+
+The empirical τp variogram shows θ falling monotonically with lag by a factor
+of 25:
+
+| lag (m) | 0–2 | 2–4 | 4–6 | 6–8 | 8–12 | 16–24 | 32–48 | 64–96 | 128–200 |
+|---|---|---|---|---|---|---|---|---|---|
+| E\|Δτp\|/d (Pa m⁻¹) | 46.7 | 29.0 | 20.9 | 16.6 | 12.9 | 7.9 | 4.9 | 3.2 | 1.9 |
+
+For an isotropic sample of a *linear* ramp of gradient g, E|Δτp|/d = g·E|cos α|
+= 2g/π ≈ 0.64 g, independent of lag. Uncorrelated noise instead contributes a
+lag-independent E|Δτp| that divides by a growing d. Fitting
+θ(d) = a + b/d gives
+
+    theta(d) = 3.87 + 72/d        (Pa/m, d in m)
+
+and both terms check out against independent estimates:
+
+| term | from the θ(d) fit | independent estimate |
+|---|---|---|
+| trend | a = 3.87 → ramp g = 6.07 Pa m⁻¹ | planar least squares on τp: **4.98 Pa m⁻¹** |
+| noise | b = 72 Pa | √2·nugget_sd·√(2/π), nugget_sd = 69 Pa: **78 Pa** |
+
+The variogram does not saturate out to 200 m (semivariance still rising) and
+the nugget is only **12% of the sill**, so our τp field is trend-dominated with
+modest local scatter — σ_local ≈ 69 Pa, about **7× smaller** than Appendix E's
+500 Pa noise scale.
+
+Consequences:
+
+- At the 3.3 m lag we use, θ = 25.7 Pa m⁻¹ is **15% trend, 85% local noise**.
+- At Meloche's own L_ss = 20 m it is 7.5 Pa m⁻¹ (52% trend), and at 50 m,
+  5.3 Pa m⁻¹ (73% trend).
+- A_ca ∝ 1/θ, so evaluating θ at 3.3 m rather than ≈ L_ss shrinks A_ca by
+  **3.4×**. This is a quantitative, calibration-free explanation of the
+  "A_ca is systematically too small" pattern that the E-relation comparison
+  (§6) exposed — and it implicates the θ *estimator*, not the slab elastic
+  relation and not any Meloche constant.
+- At the L_ss scale our θ ≈ 7.5 Pa m⁻¹ sits **below** the paper's validity
+  floor `THETA_VALID_MIN` = 20 Pa m⁻¹ (p.12: gradients above 20 Pa m⁻¹ were
+  needed to get arrest inside a simulated PST). Read literally, the Jan 18
+  weak layer has no slope-scale strength ramp steep enough to arrest a crack
+  within L_ss, so arrest there must come from slab fracture, terrain, or the
+  start-zone boundary rather than from θ. The 36.3% of clusters currently
+  below 20 Pa m⁻¹ understates this: at the trend scale it is most of them.
+
+**What this does *not* say.** It is not a licence to pick a lag that makes
+Jan 18 fit. Any lag change moves θ, hence Π₁, hence the trigger ranking and
+the whole filter chain, so it must be argued from the propagation scale the
+scaling law was calibrated at (L_ss = 20 m), not from IoU.
+
+#### Adding a τp random field is not the indicated next step
+
+Earlier notes (session 2026-10-08 §4) read JGR p.17 as calling for a Gaussian
+random field on τp, since Appendix E models local noise that way at
+L_scale = 0.5/3/10 m and we have none. Reading Appendix E directly, that is
+not what it supports:
+
+- Appendix E is a **sensitivity analysis**, and its stated result is that local
+  noise "mainly affects the **crack speed**, where the crack speed variability
+  follows the variability of the shear strength τp". It reports no effect on
+  arrest length.
+- The arrest-relevant heterogeneity in the paper is the ramp: "In our study,
+  heterogeneity is represented by a linear increase of the weak layer
+  strength." That is θ, which we already have.
+- The paper calls Appendix E "a preliminary analysis" needing "further
+  investigation ... particularly when incorporating variability in the slab
+  properties as well".
+
+And mechanically it would double-count. Our θ is already measured at 3.3 m,
+inside the noise band, and is already 85% noise. Superimposing a 500 Pa GRF
+and re-deriving θ at cluster spacing would inject a spurious gradient of
+**55–169 Pa m⁻¹** (L_scale = 10 / 3 / 0.5 m respectively), i.e. **2–7× the
+real median θ**, collapsing A_ca further in precisely the wrong direction.
+Our measured σ_local is 69 Pa, not 500 Pa.
+
+So the τp-heterogeneity item is not "add noise" but **separate the slope-scale
+trend from the local noise and feed the trend to θ**, which is the quantity
+Meloche's ramp represents. If the Appendix E speed effect is wanted later, its
+documented channel is crack speed — i.e. `dynamic_gradient`'s speed ratio and
+the mode III cap — not θ.
 
 ### Trigger cluster selection (`generate_scenarios`)
 
