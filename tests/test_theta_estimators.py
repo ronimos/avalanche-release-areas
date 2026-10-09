@@ -141,6 +141,12 @@ class TestThetaPlaneFit:
 
 
 class TestConfigDefault:
-    def test_knn_is_still_the_default(self):
-        """Every committed CSV and published number used 'knn'."""
-        assert config.THETA_ESTIMATOR == 'knn'
+    def test_plane_fit_is_the_default(self):
+        """Default since 2026-10-09, argued from the L_ss calibration scale.
+        'knn' is retained to reproduce every pre-change CSV."""
+        assert config.THETA_ESTIMATOR == 'plane_fit'
+
+    def test_fit_radius_is_the_propagation_length(self):
+        """The whole argument for 'plane_fit' is that the neighbourhood matches
+        the scale Meloche's ramp was calibrated over."""
+        assert config.THETA_FIT_RADIUS_M == config.L_SS

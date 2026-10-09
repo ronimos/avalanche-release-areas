@@ -885,6 +885,48 @@ The IoU figures in the framework-comparison table came from a threshold sweep: f
 
 The BFS pipeline IoU is a polygon-level IoU: the modelled GeoJSON polygon is intersected directly with the observed crown polygon, no rasterization.
 
+### The 2×2: why the corrections had to be adopted together
+
+Measured 2026-10-09, all four runs under identical code at
+`--max-clusters 2000`, nothing cap-bound. Two factors: the feature CSVs
+(pre-fix element means + `project_fit` E, vs thickness-weighted means + summed
+layer thicknesses + `vanherwijnen2016` E) and `config.THETA_ESTIMATOR`.
+
+| features | θ | best IoU | mean IoU | mean area/obs | A_ca range (m) |
+|---|---|---|---|---|---|
+| pre-fix (`_v1`) | `knn` | 0.669 | 0.562 | 0.77 | 27.9–62.1 |
+| corrected | `knn` | 0.531 | 0.471 | 0.62 | 13.0–32.5 |
+| pre-fix (`_v1`) | `plane_fit` | 0.625 | 0.539 | 1.18 | 63.2–170.3 |
+| **corrected** | **`plane_fit`** | **0.677** | **0.574** | **0.82** | 40.1–92.3 |
+
+Trigger-matched on the three triggers common to all four (348, 2859, 5656),
+mean IoU is 0.598 / 0.462 / 0.536 / **0.606**.
+
+**The interaction is the result, not the ranking.** The corrections move A_ca
+in opposite directions — the D_wl fix ×0.86, `vanherwijnen2016` E ×0.69,
+`plane_fit` θ ×2.9 — so each one *alone* makes the fit worse and all three
+together make it best. A single-factor IoU test would have rejected every one
+of them. This is the same compensating-error pattern first seen with the D_wl
+fix, now closed: the pre-fix configuration was not good, it was
+mutually-cancelling.
+
+**What actually justifies the choice.** Not the IoU margin, which is thin:
+0.606 vs 0.598 trigger-matched, 0.677 vs 0.669 best — roughly 1% on n = 1,
+with a metric capped at 0.830 and 29.4% of arrests set by the start-zone mask.
+IoU on this event can rule configurations *out* (it does so decisively for both
+half-corrected ones) but cannot separate the two defensible ones. The decision
+rests on each component being independently sourced — van Herwijnen et al.
+(2016) Eq. 8, the element-thickness identity verified to machine precision, and
+a θ neighbourhood matched to L_ss — plus one independent check that is *scale*
+rather than overlap: mean area/observed lands at **0.82** against the **0.83**
+a perfect mask-limited model implies, and only this configuration passes it.
+
+Caveats on record: the trigger set is not stable across the factors
+(2858/1068 → 6191/5817), so this is not a controlled comparison; trigger 6191
+is weak at 0.429; and under `plane_fit` 97.2% of start-zone clusters sit below
+the paper's θ validity floor, which remains the strongest open objection to the
+θ-based arrest route as a whole.
+
 ### Hardcoded parameter sensitivity
 
 - **δ**: The dominant sensitivity. For DH weak layers δ = 0 is better-supported, but `config.DELTA` **ships as 1.0** and `compute_meloche_features` reads it from there. Changing the default is a one-line edit in `config.py`; it is not a function argument, and the two values are not reconciled anywhere in this repo.

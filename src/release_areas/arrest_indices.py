@@ -308,11 +308,20 @@ RHO_ICE = 917.0
 DMAX_FACTOR = 1.0   # d_max = DMAX_FACTOR * grain size (both in m)
 
 # Schweizer, Michot & Kirchner (2004) Ann. Glaciol. 38, Eq. 8. A4 is the
-# paper's 0.35 kPa m. SCH2004_EXP is this project's rounding of the printed
-# 1.9 exponent to 2 -- see k_ic_schweizer2004 for what that costs.
+# paper's 0.35 kPa m.
+#
+# The exponent default changed to the paper's printed 1.9 on 2026-10-09. It had
+# been 2.0, this project's rounding of the abstract's "an exponent of about 2",
+# which runs 11% low at rho = 300 and 17% low at rho = 150. Nothing was
+# measured to justify 2.0 and nothing argues for it over the printed
+# regression, so the paper's figure is now the default and the rounding is kept
+# only as a named constant for reproducing older output. Note this cannot move
+# any release polygon: k_ic() reaches only the ligament columns, which the BFS
+# never reads.
 SCH2004_A4        = 350.0   # Pa m
-SCH2004_EXP       = 2.0     # used by default
-SCH2004_EXP_PAPER = 1.9     # as printed in Eq. 8
+SCH2004_EXP_PAPER = 1.9     # as printed in Eq. 8 (r = 0.98)
+SCH2004_EXP_ROUND = 2.0     # the abstract's "about 2"; default before 2026-10-09
+SCH2004_EXP       = SCH2004_EXP_PAPER   # used by default
 
 
 def k_ic_kirchner2000(rho, d_max=None):
@@ -339,11 +348,11 @@ def k_ic_schweizer2004(rho, d_max=None, A4=SCH2004_A4, exp=SCH2004_EXP):
     folding in the d_max^(-1/2) dependence, reported at r = 0.98.
 
     DENSITY EXPONENT: the paper's printed Eq. 8 carries **1.9**; its abstract
-    says "an exponent of about 2". We default to exp = 2.0 as specified for
-    this project, which is 11% low at rho = 300 (1.18 vs 1.32 kPa m^0.5) and
-    diverges further below it. Pass exp=SCH2004_EXP_PAPER for the printed
-    regression. Only the prefactor-and-exponent pair as printed reproduces the
-    paper's fit, so exp=2.0 is our approximation, not Schweizer et al.'s.
+    says "an exponent of about 2". Since 2026-10-09 we default to the printed
+    exp = 1.9. The earlier default of 2.0 was this project's rounding and runs
+    11% low at rho = 300 (1.18 vs 1.32 kPa m^0.5), diverging further below it;
+    only the prefactor-and-exponent pair as printed reproduces the paper's fit.
+    Pass exp=SCH2004_EXP_ROUND to reproduce output generated before the change.
 
     Valid 80-300 kg/m3: series C-F, chosen to resolve the density dependence,
     span 80-250, and the abstract quotes 100-300 across all series A-F.

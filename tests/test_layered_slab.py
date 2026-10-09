@@ -206,11 +206,25 @@ class TestKIcRelations:
         # schweizer2004 tops out at 300, so typical slab layers are clamped
         assert ai.k_ic_n_clamped([320.0, 400.0], 'schweizer2004') == 2
 
-    def test_schweizer2004_eq8(self):
-        # rho = 300, d_max = 1 mm -> ~1.18 kPa m^0.5
+    def test_schweizer2004_eq8_uses_the_printed_exponent(self):
+        # Default is the paper's printed 1.9 since 2026-10-09.
+        # rho = 300, d_max = 1 mm -> ~1.32 kPa m^0.5
         got = ai.k_ic(300.0, 'schweizer2004', d_max=1e-3)
+        assert got == pytest.approx(
+            350.0 * (300.0 / 917.0) ** 1.9 / np.sqrt(1e-3))
+        assert got / 1e3 == pytest.approx(1.32, abs=0.01)
+
+    def test_schweizer2004_printed_exponent_is_the_default(self):
+        assert ai.SCH2004_EXP == ai.SCH2004_EXP_PAPER == 1.9
+        assert ai.SCH2004_EXP_ROUND == 2.0
+
+    def test_schweizer2004_rounded_exponent_reproduces_older_output(self):
+        # What the default gave before 2026-10-09: 11% lower at rho = 300.
+        got = ai.k_ic_schweizer2004(300.0, d_max=1e-3,
+                                    exp=ai.SCH2004_EXP_ROUND)
         assert got == pytest.approx(350.0 * (300.0 / 917.0) ** 2 / np.sqrt(1e-3))
         assert got / 1e3 == pytest.approx(1.18, abs=0.01)
+        assert got < ai.k_ic(300.0, 'schweizer2004', d_max=1e-3)
 
     def test_schweizer2004_scales_as_inverse_sqrt_dmax(self):
         a = ai.k_ic(250.0, 'schweizer2004', d_max=1e-3)

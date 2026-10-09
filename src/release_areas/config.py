@@ -60,11 +60,23 @@ THETA_MIN          = 1e-6   # Pa/m; θ below this is treated as no usable gradie
 # i.e. at 3.3 m θ is 15% slope-scale trend and 85% local noise. A_ca ∝ 1/θ, so
 # the two estimators differ by ~3.4x in A_ca.
 #
-# Default is 'knn': switching moves θ, hence Π₁, hence the trigger ranking and
-# the whole filter chain, and the shipped CSVs predate the option. Any switch
-# must be argued from the propagation scale the scaling law was calibrated at
-# (L_SS), never from Jan 18 IoU.
-THETA_ESTIMATOR          = 'knn'   # 'knn' | 'plane_fit'
+# Default changed to 'plane_fit' on 2026-10-09, argued from the propagation
+# scale the scaling law was calibrated at: Meloche's θ is the gradient of a
+# linear ramp over L_ss, so the estimator's neighbourhood should be L_ss, not
+# whatever the cluster spacing happens to be. 'knn' is retained to reproduce
+# every pre-2026-10-09 CSV and published number.
+#
+# Jan 18 corroborates but did not decide it — see methods §6. Trigger-matched
+# mean IoU is 0.606 against 0.598 for the old configuration, a margin far too
+# thin on n = 1 to carry the choice. What Jan 18 does show decisively is the
+# *interaction*: 'plane_fit' alone scores 0.536 and the corrected E/D_wl
+# features alone 0.462, because the two move A_ca in opposite directions
+# (~x2.9 and ~x0.5). Each correction looks wrong in isolation and they are
+# right together, so single-factor IoU selection would have rejected all of
+# them. The independent check is scale, not overlap: mean area/observed lands
+# at 0.82 against the 0.83 a perfect mask-limited model implies, and only this
+# configuration passes it (0.77 / 0.62 / 1.18 for the others).
+THETA_ESTIMATOR          = 'plane_fit'   # 'knn' | 'plane_fit'
 THETA_FIT_RADIUS_M       = L_SS    # m; neighbourhood radius for 'plane_fit'
 THETA_FIT_MIN_NEIGHBOURS = 8       # minimum centroids in radius, else θ = NaN
 

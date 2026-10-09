@@ -22,9 +22,9 @@ src/release_areas/
 tests/
   test_arrest_indices.py    — 42 unit tests for arrest_indices.py
   test_snowpack_features.py — 12 tests for element geometry helpers
-  test_layered_slab.py      — 72 tests for layered sigma_t/E + ligament
+  test_layered_slab.py      — 74 tests for layered sigma_t/E + ligament
   test_terrain_direction.py — 33 tests for aspect, downslope walk, directional θ
-  test_theta_estimators.py  — 13 tests for the knn / plane_fit θ estimators
+  test_theta_estimators.py  — 14 tests for the knn / plane_fit θ estimators
 docs/
   release_area_methods.md — full derivation, calibration, Jan 18 application
 data/little_prof/      — Little Professor path, Jan 18 2026 event (CC BY 4.0)
@@ -34,8 +34,9 @@ data/little_prof/      — Little Professor path, Jan 18 2026 event (CC BY 4.0)
 
 | Path | Description |
 |------|-------------|
-| `features/all_start_zone_features_2026-01-18.csv` | Per-cluster WL/slab features |
-| `features/meloche_features_all_2026-01-18.csv` | Meloche Π₁, A_ca, θ per cluster |
+| `features/all_start_zone_features_2026-01-18.csv` | Per-cluster WL/slab features — **reference**, current defaults |
+| `features/meloche_features_all_2026-01-18.csv` | Meloche Π₁, A_ca, θ per cluster — **reference**, current defaults |
+| `features/*_2026-01-18_v1.csv` | The pre-2026-10-09 baseline pair, kept for reproducing older numbers. Generated with plain element means, the undercounted `wl_thickness`, `project_fit` E, `SCH2004_EXP = 2.0` and `THETA_ESTIMATOR = 'knn'`. |
 | `spatial/cluster_map.tif` | Cluster ID raster (1 m, EPSG:6342) |
 | `dem_1m.tif` | 1 m DEM (EPSG:6342 + NAVD88) |
 | `boundaries/start_zone.kml` | Topographic start zone boundary |
@@ -69,19 +70,25 @@ python -m release_areas.generate_scenarios \
     --out-dir       outputs/little_prof
 ```
 
-Expected output (verified):
+Expected output (verified 2026-10-09, reference CSVs):
 - Start zone clusters with features: 1608
-- Filter chain, one count per stage: 493 (tau_g/slope/Sk38) → 408 (slab
-  thickness) → 204 (elevation ≥ P50) → 102 (Pi1 ≥ median)
-- Top-5 triggers: [2859, 5656, 2858, 348, 1068]
-- Best IoU vs observed crown: 0.639 at the default `--max-clusters 500`
-  (3 of 5 polygons are cap-bound), 0.669 at `--max-clusters 2000`
-  (0.667 before the `find_stauchwall` direction fix of 2026-10-09; the
-  default-cap figure is unchanged because those polygons are cap-bound)
+- Filter chain, one count per stage: 490 (tau_g/slope/Sk38) → 406 (slab
+  thickness) → 203 (elevation ≥ P50) → 102 (Pi1 ≥ median 45.81)
+- Top-5 triggers: [2859, 5656, 6191, 5817, 348]
+- Best IoU vs observed crown: **0.669** at the default `--max-clusters 500`
+  (3 of 5 polygons are cap-bound), **0.677** at `--max-clusters 2000`
+- At `--max-clusters 2000`: mean IoU 0.574, mean area/observed **0.82**
+  against the 0.83 a perfect mask-limited model implies
 
-**The shipped CSVs predate the element-weighting fix** (see below), so these
-numbers are the pre-fix baseline. They still reproduce exactly, because
-`generate_scenarios` reads the CSVs and never calls `profile_features`.
+The reference CSVs are regenerated with the current defaults by
+`examples/regenerate_jan18_reference_csvs.py` (needs avachain's interpreter for
+zarr). To reproduce the **pre-2026-10-09** numbers, point both `--*-csv` flags
+at the `_v1` pair: 493 → 408 → 204 → 102, triggers
+[2859, 5656, 2858, 348, 1068], best IoU 0.639 / 0.669, mean area/observed 0.77.
+
+Note `generate_scenarios` reads the CSVs and never calls `profile_features`, so
+changing `THETA_ESTIMATOR` or any feature-generation default has **no effect on
+a scenario run until the CSVs are regenerated**.
 
 ## Element weighting in profile_features
 
@@ -109,6 +116,14 @@ with everything else held byte-identical: best IoU **0.667 → 0.636** at
 an inflated A_ca was partly compensating for the under-covered crown. That is
 not a reason to revert it and **not** a licence to re-tune anything else.
 
+**Vindicated 2026-10-09.** That call was right, and for the reason given. Once
+θ was also corrected to the L_ss scale (which pushes A_ca the *other* way,
+×2.9 against this fix's ×0.86 and the E relation's ×0.69), the fully-corrected
+configuration became the best of all four: best IoU 0.677 and mean
+area/observed 0.82. Each correction alone looks wrong; together they are right.
+Keep this in mind before judging any single correction by Jan 18 IoU — see the
+2×2 table in methods §6.
+
 `wl_shear_strength` (τp) is deliberately still a plain element mean: weighting
 it is a modelling choice (a crack runs in the weakest sublayer, so the minimum
 may be the right reduction), and it cascades into θ and the trigger ranking.
@@ -132,11 +147,15 @@ the defaults changed on 2026-10-07. All live in `arrest_indices.py`.
   default is the one consistent with the calibration point.
 - **`kirchner2000` is a LOWER BOUND on K_Ic** — apparent toughness from small
   cantilever beams, so it carries the small-specimen size effect.
-- **The ρ exponent we use in `schweizer2004` is 2.0; the paper's printed Eq. 8
-  carries 1.9** (its abstract says "about 2"). Verified against the PDF
-  2026-10-08. 2.0 is 11% low at ρ = 300 and 17% low at ρ = 150;
-  `SCH2004_EXP_PAPER` restores 1.9. The default stays 2.0 because that is what
-  was specified and tested — this is our approximation, not Schweizer et al.'s.
+- **The ρ exponent in `schweizer2004` is the paper's printed 1.9 since
+  2026-10-09** (`SCH2004_EXP = SCH2004_EXP_PAPER`). Eq. 8 carries 1.9; the
+  abstract says "about 2", which is where the old 2.0 default came from.
+  Verified against the PDF 2026-10-08. 2.0 is 11% low at ρ = 300 (1.18 vs
+  1.32 kPa·m^0.5) and 17% low at ρ = 150; `SCH2004_EXP_ROUND` reproduces it.
+  Changed on fidelity grounds — nothing was ever measured to justify the
+  rounding — and note it **cannot** move any release polygon: `k_ic()` reaches
+  only the ligament columns, which the BFS never reads, so this was a *null*
+  test against Jan 18 IoU and had to be decided from the source.
 - **`schweizer2004` is only valid to 300 kg m⁻³**, below our median slab
   density (~330). `k_ic()` clamps ρ into the fitted range *for the K_Ic
   evaluation only* (never elsewhere) and `n_rho_clamped` counts it: on Jan 18
@@ -185,7 +204,7 @@ without it are inflated 9-fold. Chunking is `(25, 126, 85)`, so loading one
 timestep costs the same as loading all 126 in its time chunk — iterate over
 location blocks with all times loaded, not over timesteps.
 
-## θ is lag-dependent — `THETA_ESTIMATOR` (default `knn`, unchanged)
+## θ is lag-dependent — `THETA_ESTIMATOR` (default `plane_fit` since 2026-10-09)
 
 θ is a property of the **lag it is measured at**, not of the snowpack. Jan 18
 start-zone clusters are 3.0 m across and the k = 6 neighbourhood `knn` uses
@@ -201,8 +220,8 @@ predicted from the 69 Pa nugget. So **at 3.3 m, θ is 15% slope-scale trend and
 
 | option | what it is |
 |---|---|
-| `knn` **(default)** | mean \|Δτp\|/d over `K_NEIGHBORS` nearest centroids. Every committed CSV and published number used this. |
-| `plane_fit` | local least-squares plane through τp within `THETA_FIT_RADIUS_M` (= `L_SS`), θ = \|∇τp\|. Estimates the ramp Meloche's θ represents. |
+| `plane_fit` **(default)** | local least-squares plane through τp within `THETA_FIT_RADIUS_M` (= `L_SS`), θ = \|∇τp\|. Estimates the ramp Meloche's θ represents, at the scale it was calibrated over. |
+| `knn` | mean \|Δτp\|/d over `K_NEIGHBORS` nearest centroids. Reproduces every pre-2026-10-09 CSV and published number. |
 
 Measured on the shipped Jan 18 τp field (1 308 start-zone clusters): θ median
 25.19 (`knn`) vs 7.28 (`plane_fit`) Pa/m, per-cluster ratio median **3.30**. As
@@ -211,13 +230,23 @@ independent 3.4× and giving a **calibration-free** explanation of the
 "A_ca is systematically too small" pattern in the v2 comparison. It implicates
 the θ *estimator*, not the slab elastic relation and not any Meloche constant.
 
-Before switching the default, weigh both of these:
+**Why `plane_fit` is the default.** The argument is the calibration scale, not
+the fit: Meloche's θ is the gradient of a linear ramp over L_ss, so the
+estimator's neighbourhood should be L_ss. `THETA_FIT_RADIUS_M = L_SS` is
+asserted in the tests for exactly that reason.
+
+Two things to keep in view, neither of which the switch resolves:
 - **97.2%** of start-zone clusters fall below `THETA_VALID_MIN` (20 Pa/m) under
   `plane_fit`, against 36.2% under `knn`. At the trend scale almost the whole
   start zone is outside the paper's calibrated regime — read literally, the
   Jan 18 weak layer has no slope-scale ramp steep enough to arrest within L_ss.
+  This is the strongest open objection to the whole θ-based arrest route and is
+  **not** evidence against `plane_fit`; `knn` only looked compliant because it
+  was measuring noise.
 - θ is NaN for **15.8%** of start-zone clusters, which lack
-  `THETA_FIT_MIN_NEIGHBOURS` within the radius.
+  `THETA_FIT_MIN_NEIGHBOURS` within the radius. End to end this costs almost
+  nothing (overall NaN rate 31.8% → 32.2%), because those clusters were already
+  NaN for other reasons.
 
 `plane_fit` also emits `theta_grad_east` / `theta_grad_north` (NaN under
 `knn`), so a θ split is available from the estimator itself if a future caller
@@ -292,15 +321,25 @@ pytest tests/ -v
 ```
 
 All 42 tests in `test_arrest_indices.py`, the 12 in
-`test_snowpack_features.py`, the 72 in `test_layered_slab.py`, the 33 in
-`test_terrain_direction.py` and the 13 in `test_theta_estimators.py` must pass
-(172 total). Do not modify tolerances to make
+`test_snowpack_features.py`, the 74 in `test_layered_slab.py`, the 33 in
+`test_terrain_direction.py` and the 14 in `test_theta_estimators.py` must pass
+(175 total). Do not modify tolerances to make
 failing tests pass — fix the underlying formula or inputs.
 
 ## Key physical constraints
 
 - **Never tune parameters to the Jan 18 2026 event.** It is the only validation event.
   Calibration targets come from Meloche et al. (2025) Table 1 / Fig 8.
+  This still holds after the 2026-10-09 default changes, which are *not* an
+  exception to it. `THETA_ESTIMATOR` and `SCH2004_EXP` were each chosen between
+  two **named, sourced options** on source grounds — the L_ss calibration scale
+  and the paper's printed exponent — not by fitting a free parameter. Jan 18 was
+  run afterwards as a check, and the record (methods §6) states explicitly that
+  the IoU margin is ~1% and too thin to have decided anything. If you are ever
+  tempted to pick a value *because* Jan 18 likes it, note what the 2×2 showed:
+  single-factor IoU selection would have rejected all three corrections that
+  are, together, the best configuration. On n = 1 the metric is not just weak,
+  it is actively misleading.
 - `R_FIT` and `C` in `arrest_indices.py` are Meloche calibration constants — do not change.
 - `arrest_indices.evaluate()` is the primary public API — keep its signature stable.
 - `config.py` is the single source of truth for every tunable constant. Do not
