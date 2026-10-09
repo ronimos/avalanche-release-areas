@@ -278,10 +278,22 @@ and our measured σ_local (69 Pa) is 7× below Appendix E's 500 Pa. The open
 item is the **scale** θ is evaluated at, not a missing random field — see §5,
 "θ is a function of the lag it is measured at".
 
-Note also that the lateral cap now depends on this doubly: since the
+Note also that the lateral cap now depends on this doubly. Since the
 cross-slope θ sampling fix of 2026-10-09, `theta_cross` is measured along the
-true cross axis, the Gaume width saturates at `GAUME_ASPECT_CAP` more often,
-and the mode III speed cap binds on all 5 Jan 18 triggers rather than 2.
+true cross axis, and `theta_along` is now measured the same way about the fall
+line rather than taken from the CSV's isotropic k-NN mean. The second half
+matters because of the lag dependence above: pairing a ~3.3 m isotropic
+numerator with a 5–50 m directional denominator inflated the ratio several-fold
+on θ(d) = 3.87 + 72/d alone, which is why it kept saturating at
+`GAUME_ASPECT_CAP`. Jan 18 Gaume widths went 55/44/50/155/38 m →
+39/34/34/112/20 m across the two fixes.
+
+Both are nonetheless **inert on the default configuration**: the mode III speed
+cap binds on all 5 Jan 18 triggers, so `d_lat = min(gaume, A_ca·0.712)` is set
+by the cap and the Gaume path never decides the lateral extent. That is itself
+worth recording — the θ-ratio width is dormant on this event, and any future
+work on flank arrest should know it is the speed cap, not Gaume, that is
+active.
 
 ---
 

@@ -251,3 +251,56 @@ class TestEstimateCrossSlopeWidth:
             1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
             aspect_deg=ASPECT)
         assert got == pytest.approx(40.0 * (3.0 / 2.0), rel=0.02)
+
+    def test_numerator_is_measured_along_slope_not_read_from_the_csv(self):
+        """theta_along must come from the fall-line sector, so a wildly wrong
+        CSV theta cannot affect the width."""
+        a = np.radians(ASPECT)
+        fall = np.array([np.sin(a), np.cos(a)])
+        cross = np.array([-fall[1], fall[0]])
+        # 4 Pa/m along the fall line, 2 Pa/m across it
+        cmap, df, T_, _, _ = _cross_slope_scene(
+            lambda de, dn: (1000.0
+                            + 4.0 * (np.array([de, dn]) @ fall)
+                            + 2.0 * (np.array([de, dn]) @ cross)),
+            theta_down=1e4)          # absurd CSV value; must be ignored
+        got = estimate_cross_slope_width(
+            1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+            aspect_deg=ASPECT)
+        assert got == pytest.approx(40.0 * (4.0 / 2.0), rel=0.02)
+
+    def test_ratio_is_invariant_to_a_uniform_tau_p_rescale(self):
+        """Both halves of the ratio are the same estimator, so scaling tau_p
+        scales numerator and denominator alike."""
+        a = np.radians(ASPECT)
+        fall = np.array([np.sin(a), np.cos(a)])
+        cross = np.array([-fall[1], fall[0]])
+
+        def scene(k):
+            return _cross_slope_scene(
+                lambda de, dn: 1000.0 + k * (3.0 * (np.array([de, dn]) @ fall)
+                                             + 2.0 * (np.array([de, dn]) @ cross)),
+                theta_down=1e4)
+
+        outs = []
+        for k in (1.0, 7.0):
+            cmap, df, T_, _, _ = scene(k)
+            outs.append(estimate_cross_slope_width(
+                1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+                aspect_deg=ASPECT))
+        assert outs[0] == pytest.approx(outs[1], rel=1e-9)
+        assert outs[0] == pytest.approx(40.0 * 1.5, rel=0.02)
+
+    def test_falls_back_to_csv_theta_when_no_along_slope_neighbour(self):
+        """tau_p constant along the fall line leaves theta_along at 0, so the
+        CSV value is the documented last resort."""
+        a = np.radians(ASPECT)
+        fall = np.array([np.sin(a), np.cos(a)])
+        cross = np.array([-fall[1], fall[0]])
+        cmap, df, T_, _, _ = _cross_slope_scene(
+            lambda de, dn: 1000.0 + 2.0 * (np.array([de, dn]) @ cross),
+            theta_down=3.0)
+        got = estimate_cross_slope_width(
+            1, A_ca=40.0, meloche_df=df, cluster_map=cmap, transform=T_,
+            aspect_deg=ASPECT)
+        assert got == pytest.approx(40.0 * (3.0 / 2.0), rel=0.02)

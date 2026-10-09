@@ -23,7 +23,7 @@ tests/
   test_arrest_indices.py    — 42 unit tests for arrest_indices.py
   test_snowpack_features.py — 12 tests for element geometry helpers
   test_layered_slab.py      — 72 tests for layered sigma_t/E + ligament
-  test_terrain_direction.py — 30 tests for aspect, downslope walk, cross-slope θ
+  test_terrain_direction.py — 33 tests for aspect, downslope walk, directional θ
   test_theta_estimators.py  — 13 tests for the knn / plane_fit θ estimators
 docs/
   release_area_methods.md — full derivation, calibration, Jan 18 application
@@ -220,8 +220,26 @@ Before switching the default, weigh both of these:
   `THETA_FIT_MIN_NEIGHBOURS` within the radius.
 
 `plane_fit` also emits `theta_grad_east` / `theta_grad_north` (NaN under
-`knn`), so an along-slope/cross-slope θ split is possible without a second
-estimator — see the `theta_down` caveat in `estimate_cross_slope_width`.
+`knn`), so a θ split is available from the estimator itself if a future caller
+wants one.
+
+**The Gaume width ratio no longer depends on the CSV θ.** `estimate_cross_slope_width`
+measures *both* halves itself via `_sector_theta` — θ_along about the fall
+line, θ_cross about the cross axis — from the same τp field in the same
+separation band. Before 2026-10-09 the numerator was the CSV's isotropic k-NN
+mean at a ~3.3 m lag while the denominator was directional at 5–50 m; given
+θ(d) ≈ 3.87 + 72/d that mismatch alone inflated the ratio several-fold and
+pushed it into `GAUME_ASPECT_CAP`. Fixing it cut the Jan 18 Gaume widths from
+55/44/50/155/38 m to 39/34/34/112/20 m (trigger 348 is no longer
+cap-saturated). The CSV θ survives only as a fallback numerator when no
+cluster lies in the along-slope sector.
+
+This change is **inert on the default Jan 18 configuration** — IoU is
+bit-identical — because `d_lat = min(gaume_width, A_ca · 0.712)` and the mode
+III speed cap binds on all 5 triggers, so the Gaume width is not what sets
+lateral extent. It matters only with `USE_MODE3_SPEED_CAP = False` or where the
+cap does not bind. Worth remembering that the Gaume path is effectively dormant
+on this event.
 
 **Do not pick the estimator by Jan 18 IoU.** Changing θ moves Π₁, hence the
 trigger ranking and the whole filter chain. Argue it from the propagation scale
@@ -274,9 +292,9 @@ pytest tests/ -v
 ```
 
 All 42 tests in `test_arrest_indices.py`, the 12 in
-`test_snowpack_features.py`, the 72 in `test_layered_slab.py`, the 30 in
+`test_snowpack_features.py`, the 72 in `test_layered_slab.py`, the 33 in
 `test_terrain_direction.py` and the 13 in `test_theta_estimators.py` must pass
-(169 total). Do not modify tolerances to make
+(172 total). Do not modify tolerances to make
 failing tests pass — fix the underlying formula or inputs.
 
 ## Key physical constraints

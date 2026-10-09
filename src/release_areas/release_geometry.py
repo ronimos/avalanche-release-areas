@@ -258,6 +258,36 @@ def _tau_p_lookup(meloche_df: pd.DataFrame,
     return None, None
 
 
+def _sector_theta(offsets, axis_x: float, axis_y: float,
+                  tau_trigger: float, tau_frame, tau_col: str,
+                  n_neighbors: int) -> float:
+    """Mean |Δτp|/d over the nearest clusters lying along a given axis.
+
+    `offsets` is a prebuilt list of (cid, dx, dy, dist_m) already filtered to
+    the [MIN_SEP, MAX_SEP] separation band. A cluster qualifies when its
+    separation points within THETA_CROSS_SECTOR_DEG of ±(axis_x, axis_y) —
+    |d·axis|, so both halves of the axis count.
+
+    Used for both the along-slope and cross-slope θ so the ratio that sets the
+    Gaume width is formed from two estimates made the same way, at the same
+    lag, from the same τp field.
+    """
+    cos_min = np.cos(np.radians(config.THETA_CROSS_SECTOR_DEG))
+    sel = sorted(((cid, d) for cid, dx, dy, d in offsets
+                  if abs(dx * axis_x + dy * axis_y) / d >= cos_min),
+                 key=lambda t: t[1])[:n_neighbors]
+
+    vals = []
+    for cid, dist_m in sel:
+        if cid not in tau_frame.index:
+            continue
+        tau_j = float(pd.to_numeric(
+            first_scalar(tau_frame.loc[cid, tau_col]), errors='coerce'))
+        if not np.isnan(tau_j) and dist_m > 0:
+            vals.append(abs(tau_trigger - tau_j) / dist_m)
+    return float(np.mean(vals)) if vals else np.nan
+
+
 def estimate_cross_slope_width(
         trigger_cluster_id: int,
         A_ca: float,
@@ -283,12 +313,15 @@ def estimate_cross_slope_width(
     lives in propagate_crack via directional_lambda(). Both are mode III
     concerns and should be revisited together when Λ_III lands.
 
-    Caveat: `theta_down` is read from the meloche CSV, where θ is the
-    *isotropic* mean over the k nearest clusters in any direction, so the
-    theta_down/theta_cross ratio pairs an undirected numerator with a
-    directional denominator. Making the numerator along-slope means changing
-    compute_meloche_features and regenerating the CSVs, which moves Π₁ and the
-    whole trigger ranking — a separate decision, see methods §3.
+    Both halves of the width ratio are measured here, by `_sector_theta`, from
+    the same τp field in the same separation band: θ_along about the fall line,
+    θ_cross about the cross axis. Taking the numerator from the meloche CSV
+    instead — as this did before 2026-10-09 — pairs an *isotropic* k-NN mean at
+    a ~3.3 m lag with a directional mean at 5-50 m, and since
+    θ(d) ≈ 3.87 + 72/d Pa/m on this slope (methods §5) the lag mismatch alone
+    inflates the ratio several-fold and drives it into `gaume_aspect_cap`.
+    The CSV θ is still used as a fallback numerator when no cluster lies in the
+    along-slope sector.
     """
     if meloche_df.empty or 'theta' not in meloche_df.columns:
         return A_ca
@@ -320,48 +353,38 @@ def estimate_cross_slope_width(
     t_row, t_col = centroids[trigger_cluster_id]
     t_x, t_y = pixel_to_utm(int(round(t_row)), int(round(t_col)), transform)
 
-    # Clusters abeam of the trigger, in the map frame: separation within
-    # [MIN_SEP, MAX_SEP] metres and pointing within THETA_CROSS_SECTOR_DEG of
-    # the cross axis. |d·cross| so both flanks qualify.
+    # Separation of every other cluster from the trigger, in the map frame,
+    # restricted once to the usable band and reused for both axes.
     asp_rad  = np.radians(float(aspect_deg))
     fall_x, fall_y   = np.sin(asp_rad), np.cos(asp_rad)
     cross_x, cross_y = -fall_y, fall_x
-    cos_min = np.cos(np.radians(config.THETA_CROSS_SECTOR_DEG))
 
-    lateral = []
+    offsets = []
     for cid, (c_row, c_col) in centroids.items():
         if cid == trigger_cluster_id:
             continue
         c_x, c_y = pixel_to_utm(int(round(c_row)), int(round(c_col)), transform)
         dx, dy   = c_x - t_x, c_y - t_y
         dist_m   = float(np.hypot(dx, dy))
-        if not (config.THETA_CROSS_MIN_SEP_M <= dist_m
-                <= config.THETA_CROSS_MAX_SEP_M):
-            continue
-        if abs(dx * cross_x + dy * cross_y) / dist_m < cos_min:
-            continue
-        lateral.append((cid, dist_m))
-
-    lateral.sort(key=lambda t: t[1])
-    lateral = lateral[:n_lateral_neighbors]
-    if not lateral:
+        if config.THETA_CROSS_MIN_SEP_M <= dist_m <= config.THETA_CROSS_MAX_SEP_M:
+            offsets.append((cid, dx, dy, dist_m))
+    if not offsets:
         return A_ca
 
-    theta_cross_vals = []
-    for cid, dist_m in lateral:
-        if cid not in tau_frame.index:
-            continue
-        tau_lat = float(pd.to_numeric(
-            first_scalar(tau_frame.loc[cid, tau_col]), errors='coerce'))
-        if not np.isnan(tau_lat) and dist_m > 0:
-            theta_cross_vals.append(abs(tau_trigger - tau_lat) / dist_m)
-
-    if not theta_cross_vals:
+    theta_cross = _sector_theta(offsets, cross_x, cross_y, tau_trigger,
+                                tau_frame, tau_col, n_lateral_neighbors)
+    if np.isnan(theta_cross):
         return A_ca
 
-    theta_cross = float(np.mean(theta_cross_vals))
+    # Numerator measured the same way, about the fall line. Falling back to the
+    # CSV θ reintroduces the estimator/lag mismatch, so it is a last resort.
+    theta_along = _sector_theta(offsets, fall_x, fall_y, tau_trigger,
+                                tau_frame, tau_col, n_lateral_neighbors)
+    if np.isnan(theta_along) or theta_along < config.THETA_MIN:
+        theta_along = theta_down
+
     if theta_cross > config.THETA_MIN:
-        width_factor = min(theta_down / theta_cross, gaume_aspect_cap)
+        width_factor = min(theta_along / theta_cross, gaume_aspect_cap)
     else:
         width_factor = gaume_aspect_cap
 
