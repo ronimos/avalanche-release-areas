@@ -73,7 +73,9 @@ Expected output (verified):
   thickness) → 204 (elevation ≥ P50) → 102 (Pi1 ≥ median)
 - Top-5 triggers: [2859, 5656, 2858, 348, 1068]
 - Best IoU vs observed crown: 0.639 at the default `--max-clusters 500`
-  (3 of 5 polygons are cap-bound), 0.667 at `--max-clusters 2000`
+  (3 of 5 polygons are cap-bound), 0.669 at `--max-clusters 2000`
+  (0.667 before the `find_stauchwall` direction fix of 2026-10-09; the
+  default-cap figure is unchanged because those polygons are cap-bound)
 
 **The shipped CSVs predate the element-weighting fix** (see below), so these
 numbers are the pre-fix baseline. They still reproduce exactly, because

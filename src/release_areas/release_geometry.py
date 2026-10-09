@@ -203,18 +203,31 @@ def find_stauchwall(trigger_row: int,
                     threshold_deg: float = STAUCHWALL_DEG,
                     max_steps: int = 500
                     ) -> tuple[int, int]:
-    """Walk downslope from trigger pixel until slope drops below threshold."""
+    """Walk downslope from trigger pixel until slope drops below threshold.
+
+    Each step advances one pixel width along the *local* aspect, carrying
+    sub-pixel position across iterations. Taking `int(np.sign(...))` of the
+    direction components instead would quantise every step to a pure
+    diagonal — sign() is ±1 for any nonzero component, so only the four
+    bearings 45/135/225/315 are reachable and the walk becomes a straight
+    ray. On the Little Professor ESE start zone (aspect 110-120 deg) that
+    quantisation sent every trigger off at 135 deg, a systematic +14 deg
+    median clockwise error that rotated the release polygons toward south.
+    """
     nrows, ncols = slope_grid.shape
     row, col     = trigger_row, trigger_col
+    row_f, col_f = float(trigger_row), float(trigger_col)
 
     for _ in range(max_steps):
         if slope_grid[row, col] < threshold_deg:
             return row, col
         asp_rad = np.radians(aspect_grid[row, col])
-        dr = int(np.sign(-np.cos(asp_rad)))
-        dc = int(np.sign( np.sin(asp_rad)))
-        new_row = row + dr
-        new_col = col + dc
+        # Downslope unit vector, map frame -> pixel frame:
+        # east = +sin(aspect) -> +col, north = +cos(aspect) -> -row.
+        row_f += -np.cos(asp_rad)
+        col_f +=  np.sin(asp_rad)
+        new_row = int(round(row_f))
+        new_col = int(round(col_f))
         if not (0 <= new_row < nrows and 0 <= new_col < ncols):
             break
         if np.isnan(slope_grid[new_row, new_col]):
@@ -963,8 +976,12 @@ def plot_release_comparison(
               transform.c + ncols * transform.a,
               transform.f + nrows * transform.e,
               transform.f]
+    # aspect='equal': the extent is projected metres (EPSG:6342), so 'auto'
+    # stretches east against north to fill the axes box and every bearing
+    # read off the figure is wrong. On the Jan 18 domain (455 x 546 m in a
+    # square figure) that was a 1.21x anisotropy, a -4.6 deg apparent rotation.
     ax.imshow(hillshade, cmap='gray', extent=extent,
-              alpha=0.6, aspect='auto', origin='upper')
+              alpha=0.6, aspect='equal', origin='upper')
 
     if start_zone_mask is not None:
         ax.contour(start_zone_mask.astype(float), levels=[0.5],
