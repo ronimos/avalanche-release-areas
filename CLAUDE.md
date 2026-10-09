@@ -23,6 +23,8 @@ tests/
   test_arrest_indices.py    — 42 unit tests for arrest_indices.py
   test_snowpack_features.py — 12 tests for element geometry helpers
   test_layered_slab.py      — 72 tests for layered sigma_t/E + ligament
+  test_terrain_direction.py — 30 tests for aspect, downslope walk, cross-slope θ
+  test_theta_estimators.py  — 13 tests for the knn / plane_fit θ estimators
 docs/
   release_area_methods.md — full derivation, calibration, Jan 18 application
 data/little_prof/      — Little Professor path, Jan 18 2026 event (CC BY 4.0)
@@ -183,6 +185,88 @@ without it are inflated 9-fold. Chunking is `(25, 126, 85)`, so loading one
 timestep costs the same as loading all 126 in its time chunk — iterate over
 location blocks with all times loaded, not over timesteps.
 
+## θ is lag-dependent — `THETA_ESTIMATOR` (default `knn`, unchanged)
+
+θ is a property of the **lag it is measured at**, not of the snowpack. Jan 18
+start-zone clusters are 3.0 m across and the k = 6 neighbourhood `knn` uses
+averages **3.3 m**, i.e. inside the 0.5–10 m band Meloche et al. treat as local
+noise in Appendix E. The τp variogram gives
+
+    theta(d) = 3.87 + 72/d        (Pa/m, d in m)
+
+cross-checked twice: the trend term implies a ramp of 6.07 Pa/m against 4.98
+from an independent planar fit, and the noise term 72 Pa against 78 Pa
+predicted from the 69 Pa nugget. So **at 3.3 m, θ is 15% slope-scale trend and
+85% local noise**; at Meloche's L_ss = 20 m it is 7.5 Pa/m.
+
+| option | what it is |
+|---|---|
+| `knn` **(default)** | mean \|Δτp\|/d over `K_NEIGHBORS` nearest centroids. Every committed CSV and published number used this. |
+| `plane_fit` | local least-squares plane through τp within `THETA_FIT_RADIUS_M` (= `L_SS`), θ = \|∇τp\|. Estimates the ramp Meloche's θ represents. |
+
+Measured on the shipped Jan 18 τp field (1 308 start-zone clusters): θ median
+25.19 (`knn`) vs 7.28 (`plane_fit`) Pa/m, per-cluster ratio median **3.30**. As
+A_ca ∝ 1/θ, `plane_fit` multiplies A_ca by ~3.3× — matching the variogram's
+independent 3.4× and giving a **calibration-free** explanation of the
+"A_ca is systematically too small" pattern in the v2 comparison. It implicates
+the θ *estimator*, not the slab elastic relation and not any Meloche constant.
+
+Before switching the default, weigh both of these:
+- **97.2%** of start-zone clusters fall below `THETA_VALID_MIN` (20 Pa/m) under
+  `plane_fit`, against 36.2% under `knn`. At the trend scale almost the whole
+  start zone is outside the paper's calibrated regime — read literally, the
+  Jan 18 weak layer has no slope-scale ramp steep enough to arrest within L_ss.
+- θ is NaN for **15.8%** of start-zone clusters, which lack
+  `THETA_FIT_MIN_NEIGHBOURS` within the radius.
+
+`plane_fit` also emits `theta_grad_east` / `theta_grad_north` (NaN under
+`knn`), so an along-slope/cross-slope θ split is possible without a second
+estimator — see the `theta_down` caveat in `estimate_cross_slope_width`.
+
+**Do not pick the estimator by Jan 18 IoU.** Changing θ moves Π₁, hence the
+trigger ranking and the whole filter chain. Argue it from the propagation scale
+the scaling law was calibrated at (L_ss). Full derivation in methods §5.
+
+**Adding a τp Gaussian random field is *not* the indicated next step** — a
+reading of Appendix E that earlier notes got wrong. Appendix E is a sensitivity
+analysis whose stated result is that local noise "mainly affects the crack
+speed"; the paper's arrest-relevant heterogeneity *is* the linear ramp. Our
+measured σ_local is 69 Pa against Appendix E's 500 Pa, and superimposing that
+field would inject 55–169 Pa/m of spurious θ (2–7× the real median), shrinking
+A_ca further in the wrong direction.
+
+## Terrain direction — two fixed bugs, and the lesson
+
+`compute_slope_aspect` is **correct**: verified to 0.0000° against a map-frame
+gradient over real easting/northing arrays and a least-squares plane fit. The
+start zone is genuinely **ESE 121.5°** (observed crown axis 119.0°).
+
+Two bugs confused map direction with raster indexing, both fixed 2026-10-09:
+
+- `find_stauchwall` stepped `dr = sign(-cos(asp)), dc = sign(sin(asp))`.
+  `np.sign` is ±1 for any nonzero component, so only the four bearings
+  45/135/225/315 were reachable — a pure diagonal on **100.00%** of start-zone
+  pixels, median **+13.9°** clockwise error, and the walk was a straight ray
+  that never followed terrain. Now carries sub-pixel position.
+- `estimate_cross_slope_width` picked "abeam" neighbours by raster row/col,
+  which assumes a north–south fall line. Selected neighbours sat a mean **30°**
+  off the true cross axis (one within 1.2° of the fall line), so `theta_cross`
+  absorbed the along-slope gradient. Now samples in the map frame within
+  ±`THETA_CROSS_SECTOR_DEG` of the cross axis.
+
+**The lesson generalises:** this package converts between pixel `(row, col)`
+and map `(east, north)` constantly, and **row increases southward**. Any new
+code that derives a direction must be checked against the map frame, never
+assumed from array axes. `tests/test_terrain_direction.py` covers both helpers
+with planar-DEM fixtures at known bearings; neither had coverage before.
+
+Side effect worth knowing: with `theta_cross` sampled correctly the Gaume width
+saturates at `GAUME_ASPECT_CAP` more often, so the **mode III speed cap now
+binds on all 5 Jan 18 triggers rather than 2** and alone sets lateral extent.
+
+Residual polygon lean is the **start-zone KML itself** — its own principal axis
+is 136.4° SE — i.e. the same boundary that caps IoU at 0.830.
+
 ## Run tests
 
 ```bash
@@ -190,8 +274,9 @@ pytest tests/ -v
 ```
 
 All 42 tests in `test_arrest_indices.py`, the 12 in
-`test_snowpack_features.py` and the 72 in `test_layered_slab.py` must pass
-(126 total). Do not modify tolerances to make
+`test_snowpack_features.py`, the 72 in `test_layered_slab.py`, the 30 in
+`test_terrain_direction.py` and the 13 in `test_theta_estimators.py` must pass
+(169 total). Do not modify tolerances to make
 failing tests pass — fix the underlying formula or inputs.
 
 ## Key physical constraints
