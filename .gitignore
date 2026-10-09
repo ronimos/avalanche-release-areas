@@ -11,6 +11,13 @@ venv/
 outputs/
 *.png
 *.pdf
+# ...except OUR OWN figures embedded in the methods doc, whitelisted one by one.
+# Do NOT add docs/figures/jgr_fig*.png or anything else cropped from a paper:
+# this repo is public and papers/ is ignored for exactly that reason. The
+# methods doc links those six JGR figures for local reading only.
+!docs/figures/
+!docs/figures/release_comparison_*.png
+!docs/figures/energy_cap_check.png
 .DS_Store
 # Reference papers — PDFs, some misnamed .md; never commit
 papers/

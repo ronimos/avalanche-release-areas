@@ -35,6 +35,13 @@ Check on K_wl: the JGR paper states "K_wl = 0.2 MPa" but also u_c = 0.2 mm at τ
 
 ## 2. Published relations (Meloche et al. 2025, ISSW 2026)
 
+> **Figure note.** The six `figures/jgr_fig*.png` images referenced in this
+> section are crops from Meloche et al. (2025) and are **not committed** — this
+> repository is public and `papers/` is gitignored for the same reason, so those
+> links only resolve in a local working copy that has them. Consult the paper
+> directly (doi:10.1029/2025JF008470) for the figures. The two figures that do
+> ship, `energy_cap_check.png` and `release_comparison_20260118.png`, are ours.
+
 **Elastic length (upslope, mode II)**
 
 Λ = √( E h D_wl / ((1−ν²) G_wl) )
@@ -864,10 +871,16 @@ Filter chain output (Jan 18 2026), one count per stage:
 | Stage | Surviving clusters |
 |---|---|
 | Start-zone clusters with features | 1608 |
-| τg ≥ 40 Pa, slope ≥ 30°, Sk38 < 1.0 | 493 |
-| Slab thickness 0.5–2.0 m | 408 |
-| Elevation ≥ P50 (3656 m) | 204 |
-| Π₁ ≥ median (31.30) | 102 |
+| τg ≥ 40 Pa, slope ≥ 30°, Sk38 < 1.0 | 490 |
+| Slab thickness 0.5–2.0 m | 406 |
+| Elevation ≥ P50 (3656 m) | 203 |
+| Π₁ ≥ median (45.81) | 102 |
+
+All numbers in this section are the **reference** configuration of 2026-10-09
+(`THETA_ESTIMATOR = 'plane_fit'`, corrected element weighting,
+`vanherwijnen2016` E). The Π₁ gate moved 31.30 → 45.81 with the θ estimator,
+since Π₁ ∝ 1/θ. For the pre-2026-10-09 figures, use the `_v1` CSV pair:
+493 → 408 → 204 → 102.
 
 (An earlier revision of this table attributed 493 → 408 → 204 all to the first
 filter and reported 51 final candidates; both were wrong.)
@@ -878,36 +891,41 @@ volume is the integral of that depth over the release area.
 
 | Scenario | Trigger cid | Sk38 | A_ca (m) | Area (m²) | Depth (m) | Volume (m³) | IoU | Cap-bound |
 |---|---|---|---|---|---|---|---|---|
-| scenario_001 | 2859 | 0.72 | 49 | 5 611 | 1.44 | 6 718 | 0.525 | yes |
-| scenario_002 | 5656 | 0.72 | 43 | 4 647 | 1.64 | 4 133 | 0.519 | no |
-| scenario_003 | 2858 | 0.74 | 32 | 4 521 | 1.65 | 3 990 | 0.486 | no |
-| scenario_004 | 348  | 0.75 | 62 | 5 366 | 1.55 | 6 104 | **0.639** ← best | yes |
-| scenario_005 | 1068 | 0.75 | 28 | 5 581 | 1.55 | 6 788 | 0.557 | yes |
+| scenario_001 | 2859 | 0.72 | 54 | 5 168 | 1.56 | 5 455 | **0.669** ← best | yes |
+| scenario_002 | 5656 | 0.72 | 50 | 4 384 | 1.58 | 4 544 | 0.580 | no |
+| scenario_003 | 6191 | 0.72 | 40 | 3 112 | 1.68 | 2 758 | 0.429 | no |
+| scenario_004 | 5817 | 0.73 | 77 | 5 247 | 1.48 | 6 596 | 0.533 | yes |
+| scenario_005 | 348  | 0.75 | 92 | 5 273 | 1.47 | 6 525 | 0.531 | yes |
 
-**Summary:** observed 6 934 m² · modelled P50 5 366 m² · ratio 0.77 · best IoU 0.639.
+**Summary:** observed 6 934 m² · modelled P50 5 168 m² · ratio 0.75 · best IoU 0.669 · mean IoU 0.548.
 
 Because 3 of the 5 polygons are cap-bound, these are not purely physical
 results. Letting the arrest criteria terminate the flood-fill
 (`--max-clusters 2000`; identical for any value ≥ 1000) gives:
 
-| Scenario | Trigger cid | Area (m²) | Depth (m) | Volume (m³) | IoU |
-|---|---|---|---|---|---|
-| scenario_001 | 2859 | 7 209 | 1.46 | 7 444 | 0.608 |
-| scenario_002 | 5656 | 4 647 | 1.64 | 4 133 | 0.519 |
-| scenario_003 | 2858 | 4 521 | 1.65 | 3 990 | 0.486 |
-| scenario_004 | 348  | 6 405 | 1.57 | 6 742 | **0.667** ← best |
-| scenario_005 | 1068 | 7 672 | 1.52 | 8 434 | 0.556 |
+| Scenario | Trigger cid | A_ca (m) | Area (m²) | Depth (m) | Volume (m³) | IoU |
+|---|---|---|---|---|---|---|
+| scenario_001 | 2859 | 53.7 | 5 591 | 1.57 | 5 644 | **0.677** ← best |
+| scenario_002 | 5656 | 50.1 | 4 384 | 1.58 | 4 544 | 0.580 |
+| scenario_003 | 6191 | 40.1 | 3 112 | 1.68 | 2 758 | 0.429 |
+| scenario_004 | 5817 | 77.3 | 7 174 | 1.52 | 7 887 | 0.623 |
+| scenario_005 | 348  | 92.3 | 8 336 | 1.46 | 9 228 | 0.560 |
 
-**Summary:** observed 6 934 m² · modelled P50 6 405 m² · ratio 0.92 · best IoU 0.667.
+**Summary:** observed 6 934 m² · modelled P50 5 591 m² · ratio 0.81 · best IoU
+0.677 · mean IoU 0.574 · **mean area/observed 0.82**.
 
-Uncapped, the model slightly under-predicts area (ratio 0.92) and all five
-polygons overlap the observed crown (IoU 0.49–0.67). The spread in area
-(4 500–7 700 m²) reflects trigger location, since all five use
-size_factor = 1.0.
+Uncapped, all five polygons overlap the observed crown (IoU 0.43–0.68) and the
+mean area ratio is 0.82 — against the **0.83** a perfect mask-limited model
+implies, since 17% of the crown lies outside the start-zone KML and the BFS
+hard-rejects outside it. That agreement is the independent *scale* check
+discussed in the 2×2 below; it is not an overlap metric and is the one place
+this configuration is clearly better than the alternatives. The spread in area
+(3 100–8 300 m²) reflects trigger location, since all five use
+size_factor = 1.0; scenario_003 (6191) is the weak one at 0.429.
 
 ![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown. Coloured outlines: five modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
 
-*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Figure predates the crown update and the cap fix — regenerate with the command below.*
+*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Regenerated 2026-10-09 from the reference CSVs with `--max-clusters 2000`, so it shows the uncapped table above — the default-cap run is cap-bound on 3 of 5 and is not a physical result. Plotted equal-aspect; before the 2026-10-09 fix the axes were `aspect='auto'`, which stretched east against north by 1.21× and made every bearing read off the figure wrong by −4.6°.*
 
 To reproduce:
 
