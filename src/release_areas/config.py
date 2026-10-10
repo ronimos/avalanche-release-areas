@@ -219,9 +219,60 @@ USE_MODE3_LAMBDA = False
 # The ratio depends only on nu and the two speed ratios (E and rho cancel).
 MODE2_SPEED_RATIO   = 1.6    # adot / c_s upslope, Meloche et al. (2025)
 MODE3_SPEED_RATIO   = 1.0    # adot / c_s cross-slope cap, Broberg (1989)
+#
+# DEFAULT FLIPPED True -> False on 2026-10-10 (Ron's call). The argument is
+# COMPLETENESS, not fit: only the *restrictive* half of mode III is coded. The
+# speed cap shortens lateral propagation, but because G < E' an equal-strength
+# slab also has a LARGER energy cap cross-slope — G_slab,III = tau_flank^2 h/(2G)
+# against sigma_t^2 h/(2E') — which pushes the other way. That term needs a slab
+# flank strength tau_flank for which no parameterisation exists (blocked on a
+# Cam-Clay beta ambiguity, methods §3), so it is absent. Applying one side of a
+# two-sided effect biases the model toward over-arrest, and the honest default
+# for a half-implemented term is off.
+#
+# Jan 18 is consistent with that reading but did NOT decide it: cap off gives
+# mean IoU 0.622 against 0.562 and area/observed 0.78 against 0.63, i.e. the
+# cap-on model under-predicts area and the cap is what makes it do so. Per the
+# no-tuning rule, read that as corroboration of the one-sided-implementation
+# argument, not as the justification — on n = 1 the metric cannot carry a
+# decision (see the §6 2x2, where single-factor IoU selection would have
+# rejected all three corrections that are jointly the best configuration).
+#
+# TO FLIP IT BACK: once tau_flank lands, turn BOTH halves on together —
+# slab_energy_cap_cross plus this cap. Turning this one back on alone would
+# restore the same one-sided bias.
 USE_MODE3_SPEED_CAP = True   # apply the ratio to the lateral distance cap
+
+# ---- Anisotropic BFS rings (cross-slope growth rate) -------------------
+# The same speed ratio, applied to the *growth* of the flood-fill rather than
+# only to a terminal distance cap. If one BFS ring stands for one increment of
+# crack-front advance in TIME, then a front running at 1.6 c_s along-slope and
+# c_s cross-slope should already be ~1.6x further along-slope when it arrives.
+# The isotropic ring loop instead advances one cluster hop in every direction
+# per ring and only clips afterwards with d_up / d_down / d_lat, which leaves
+# the front shape an artifact of cluster geometry.
+#
+# With rings on, a cross-slope candidate is admitted at ring k only once
+#     dist <= k * RING_STEP_M * (MODE3_SPEED_RATIO / MODE2_SPEED_RATIO)
+# and is otherwise DEFERRED to a later ring — arrest is still evaluated when
+# the front arrives, never skipped because it arrived early. The event has a
+# finite duration: when nothing else can be admitted, clusters still outside
+# the cross-slope budget are dropped, so the flanks are cut at ~0.625x the
+# along-slope reach.
+#
+# RING_STEP_M = None derives the step from the median nearest-neighbour cluster
+# centroid separation, i.e. the natural along-slope advance of one hop, so the
+# fast axis grows at the unmodified BFS rate and only the slow axis is held
+# back. Set a number to override.
+#
+# Judge this against the observed crown's aspect (Jan 18 major axis 119 deg,
+# L/W 3.51), which is a sharper test than IoU, and do NOT tune the ratio — 1.6
+# is Broberg's, not ours. Note it reuses the SAME 1.6 as USE_MODE3_SPEED_CAP,
+# so running both risks double-counting one physical effect; see methods §3.
+USE_ANISOTROPIC_RINGS = False
+RING_STEP_M           = None
 BFS_K_NEIGHBOURS      = 8      # cluster adjacency degree for the flood-fill
-MAX_BFS_CLUSTERS      = 500    # safety cap on region size; see methods §5
+MAX_BFS_CLUSTERS      = 2000   # safety cap on region size; see methods §5
 
 # Meloche per-direction arrest test inside the BFS. Disabled by default: the
 # flood-fill uses the Λ/thickness discontinuity heuristics plus TAU_G_ABS_FLOOR

@@ -120,12 +120,30 @@ def main():
     ap.add_argument('--max-slab-thickness', type=float, default=config.MAX_SLAB_THICKNESS,
                     help='Maximum slab thickness for trigger candidates (m). '
                          'Use 1.5 for skier-triggered scenarios, 2.0 for natural/large-slab events.')
-    ap.add_argument('--max-clusters',       type=int, default=config.MAX_BFS_CLUSTERS,
+    ap.add_argument('--max-clusters', type=int, default=config.MAX_BFS_CLUSTERS,
                     help=f'Safety cap on BFS region size in clusters '
                          f'(default: {config.MAX_BFS_CLUSTERS}). A warning is printed '
                          f'when the cap, rather than the arrest criteria, stops the '
                          f'flood-fill — raise it to let the physics terminate.')
+    ap.add_argument('--anisotropic-rings', action=argparse.BooleanOptionalAction,
+                    default=config.USE_ANISOTROPIC_RINGS,
+                    help='Grow the BFS MODE2/MODE3_SPEED_RATIO times further '
+                         'along-slope than cross-slope per ring, instead of '
+                         'growing isotropically and clipping with d_lat '
+                         f'(default: {config.USE_ANISOTROPIC_RINGS}). Reuses the '
+                         'same 1.6 as --mode3-speed-cap, so enabling both '
+                         'double-counts one physical effect.')
+    ap.add_argument('--mode3-speed-cap', action=argparse.BooleanOptionalAction,
+                    default=config.USE_MODE3_SPEED_CAP,
+                    help='Cap lateral extent at A_ca x L_dyn,III/L_dyn,II '
+                         f'(default: {config.USE_MODE3_SPEED_CAP}). Off is '
+                         'bit-for-bit identical to pre-cap behaviour.')
     args = ap.parse_args()
+
+    # propagate_crack reads these from config, so set them before any run.
+    # Both are physics switches, not tuning knobs — see config.py.
+    config.USE_ANISOTROPIC_RINGS = args.anisotropic_rings
+    config.USE_MODE3_SPEED_CAP   = args.mode3_speed_cap
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)

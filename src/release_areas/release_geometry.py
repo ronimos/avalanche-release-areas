@@ -77,6 +77,21 @@ def mode3_speed_cap_ratio(trigger_cluster_id: int,
         config.MODE2_SPEED_RATIO, config.MODE3_SPEED_RATIO))
 
 
+def _hop_length_m(neighbours: dict, centroids: dict) -> float:
+    """Median centroid separation of adjacent clusters in the BFS graph (m).
+
+    One ring of the flood-fill advances one graph hop, so this is the natural
+    per-ring advance and the length scale the anisotropic ring budget is
+    expressed in. Taken over every edge rather than per cluster so it is a
+    property of the graph, not of where the trigger happens to sit.
+    """
+    seps = [float(np.hypot(centroids[a][0] - centroids[b][0],
+                           centroids[a][1] - centroids[b][1]))
+            for a, nbrs in neighbours.items() if a in centroids
+            for b in nbrs if b in centroids]
+    return float(np.median(seps)) if seps else 0.0
+
+
 def directional_lambda(props: dict, is_cross: bool) -> float:
     """Elastic length Λ to use for propagation in a given direction.
 
@@ -693,6 +708,27 @@ def propagate_crack(
 
     trigger_props = _get_props(trigger_cluster_id)
 
+    def _direction(cid):
+        """(dist, is_upslope, is_downslope, is_cross) of a cluster from the trigger.
+
+        Direction is the fall-line sector the cluster falls in: within ±45° of
+        the downslope bearing is downslope, within ±45° of the opposite is
+        upslope, everything else is cross-slope (mode III / flank). Returns
+        None when the cluster has no centroid.
+        """
+        xy = centroids.get(cid)
+        if xy is None:
+            return None
+        asp_rad        = np.radians(t_aspect)
+        fall_x, fall_y = np.sin(asp_rad), np.cos(asp_rad)
+        dx, dy         = xy[0] - t_x, xy[1] - t_y
+        dist           = float(np.hypot(dx, dy))
+        dot            = (dx * fall_x + dy * fall_y) / max(dist, 1e-6)
+
+        is_downslope = dot >  0.707
+        is_upslope   = dot < -0.707
+        return dist, is_upslope, is_downslope, not is_upslope and not is_downslope
+
     def _qualifies(cid, current_props):
         if start_zone_mask is not None:
             px = pixel_index.get(cid)
@@ -702,20 +738,10 @@ def propagate_crack(
             if not start_zone_mask[r, c]:
                 return False, 'outside_start_zone'
 
-        xy = centroids.get(cid)
-        if xy is None:
+        direction = _direction(cid)
+        if direction is None:
             return False, 'no_data'
-        asp_rad        = np.radians(t_aspect)
-        fall_x, fall_y = np.sin(asp_rad), np.cos(asp_rad)
-        dx, dy         = xy[0] - t_x, xy[1] - t_y
-        dist           = np.sqrt(dx**2 + dy**2)
-        dot            = (dx * fall_x + dy * fall_y) / max(dist, 1e-6)
-
-        is_downslope = dot >  0.707
-        is_upslope   = dot < -0.707
-        # Anything not within ±45° of the fall line is treated as cross-slope,
-        # i.e. mode III / flank propagation.
-        is_cross     = not is_upslope and not is_downslope
+        dist, is_upslope, is_downslope, is_cross = direction
 
         if is_upslope   and dist > d_up:   return False, 'upslope_distance_cap'
         if is_downslope and dist > d_down: return False, 'downslope_distance_cap'
@@ -811,13 +837,76 @@ def propagate_crack(
     current_ring   = [trigger_cluster_id]
     ring_idx       = 0
 
+    # Anisotropic rings: the cross-slope front advances
+    # MODE3_SPEED_RATIO / MODE2_SPEED_RATIO as far per ring as the along-slope
+    # front, so a cross-slope candidate waits ("deferred") until the budget
+    # reaches it. ring_step is the natural one-hop advance, so the along-slope
+    # axis keeps the unmodified BFS rate and only the flanks are held back.
+    rings_on   = config.USE_ANISOTROPIC_RINGS
+    ring_ratio = (config.MODE3_SPEED_RATIO / config.MODE2_SPEED_RATIO
+                  if config.MODE2_SPEED_RATIO > 0 else 1.0)
+    ring_step  = config.RING_STEP_M if config.RING_STEP_M else _hop_length_m(
+        neighbours, centroids)
+    deferred: list = []     # (cid, parent_props, dist) still outside the budget
+    if rings_on:
+        print(f"    anisotropic rings ON: cross advance "
+              f"{ring_ratio:.3f} x {ring_step:.2f} m per ring")
+        if not (ring_step > 0 and ring_ratio > 0):
+            # A zero budget would never admit a flank cluster and the deferral
+            # queue would never drain, so refuse rather than hang.
+            raise ValueError("anisotropic rings need a positive ring_step and "
+                             f"speed ratio, got {ring_step} and {ring_ratio}")
+
+    # The clock that drives the cross-slope budget counts only rings in which
+    # an along-slope cluster was admitted. Using the global ring counter
+    # instead is self-defeating: flank growth keeps the flood-fill alive, which
+    # raises the flanks' own budget, so the constraint evaporates (measured on
+    # Jan 18 with the lateral cap removed: 53 rings, a 132 m budget, 1 cluster
+    # dropped). Physically the flanks are fed by the advancing crack front, so
+    # it is the front's progress — not their own — that buys them time.
+    along_clock = 0
+
+    def _cross_budget():
+        return along_clock * ring_step * ring_ratio
+
     if wave_callback is not None:
         wave_callback(0, [trigger_cluster_id], [])
 
+    # Deferred candidates are drained inside this loop, so they are only ever
+    # admitted while the front is still advancing — the front stopping IS the
+    # end of the event. Spinning extra rings to let the budget catch up would
+    # give the flanks unlimited time and make the anisotropy a no-op.
     while current_ring and len(reached) < max_clusters:
         ring_idx += 1
         next_ring = []
         ring_arrested = []
+        budget = _cross_budget()
+        admitted_along = False
+
+        def _admit(cid, parent_props):
+            """Evaluate arrest for one candidate and record the outcome."""
+            nonlocal admitted_along
+            qualifies, reason = _qualifies(cid, parent_props)
+            if qualifies:
+                reached.add(cid)
+                cluster_props[cid] = _get_props(cid)
+                next_ring.append(cid)
+                direction = _direction(cid)
+                if direction is not None and not direction[3]:
+                    admitted_along = True
+            else:
+                ring_arrested.append({'cid': cid, 'reason': reason})
+
+        # Deferred flank candidates the budget has now caught up with. Arrest
+        # is evaluated here, on arrival, not when the cluster was deferred.
+        if deferred:
+            still_deferred = []
+            for cid, parent_props, dist in deferred:
+                if dist <= budget:
+                    _admit(cid, parent_props)
+                else:
+                    still_deferred.append((cid, parent_props, dist))
+            deferred = still_deferred
 
         for current in current_ring:
             current_props = cluster_props.get(current, trigger_props)
@@ -825,13 +914,17 @@ def propagate_crack(
                 if nbr in visited:
                     continue
                 visited.add(nbr)
-                qualifies, reason = _qualifies(nbr, current_props)
-                if qualifies:
-                    reached.add(nbr)
-                    cluster_props[nbr] = _get_props(nbr)
-                    next_ring.append(nbr)
-                else:
-                    ring_arrested.append({'cid': nbr, 'reason': reason})
+                if rings_on:
+                    direction = _direction(nbr)
+                    if direction is not None:
+                        dist, _, _, is_cross = direction
+                        if is_cross and dist > budget:
+                            deferred.append((nbr, current_props, dist))
+                            continue
+                _admit(nbr, current_props)
+
+        if admitted_along:
+            along_clock += 1
 
         if not next_ring and not ring_arrested:
             break
@@ -840,6 +933,14 @@ def propagate_crack(
             wave_callback(ring_idx, next_ring, ring_arrested)
 
         current_ring = next_ring
+
+    # The event has a finite duration: once nothing more can be admitted, any
+    # flank candidate still outside the cross-slope budget is never reached.
+    # This is where the anisotropy sets lateral extent rather than only order.
+    if deferred:
+        print(f"    {len(deferred)} flank clusters dropped — still outside the "
+              f"cross-slope budget ({_cross_budget():.0f} m) when propagation "
+              f"stopped at ring {ring_idx} (along-slope clock {along_clock})")
 
     # Distinguish "arrest criteria stopped the crack" from "the safety cap did".
     cap_bound = len(reached) >= max_clusters and bool(current_ring)
