@@ -77,9 +77,19 @@ Expected output (verified 2026-10-09, reference CSVs):
 - Top-3 triggers: [2859, 5656, 6191] — Sk38 all 0.72, i.e. `N_TOP_TRIGGERS = 3`
   cuts *inside* a three-way tie, so the selection is decided by tie ordering,
   not by a margin
-- Best IoU vs observed crown: **0.669** at the default `--max-clusters 500`
-  (1 of 3 polygons is cap-bound), **0.677** at `--max-clusters 2000`
-- At `--max-clusters 2000`: mean IoU 0.562, mean area/observed 0.63
+- Per-scenario areas 4 791 / 5 474 / 5 897 m² (observed crown 6 934 m²)
+- Best IoU vs observed crown: **0.693** at the default `--max-clusters 2000`,
+  where **no polygon is cap-bound** — every one of the three is terminated by
+  the arrest criteria, which is the point of the 2000 default. Mean IoU 0.622,
+  mean area/observed 0.78.
+- These are **post-2026-10-10 numbers**, with `USE_MODE3_SPEED_CAP = False`.
+  With the cap on (the earlier default) the same run gives best IoU 0.677,
+  mean 0.562, area/observed 0.63 — reproduce with `--mode3-speed-cap`.
+- At `--max-clusters 500` it is **0.669** with 1 of 3 polygons cap-bound. 500
+  is *not* the default (`config.MAX_BFS_CLUSTERS = 2000`); earlier revisions of
+  this file called it the default, which was wrong. Region size saturates by
+  ~1 000 clusters, so any value ≥ 1 000 gives the same answer — raising the cap
+  is not tuning to the event, it is removing a non-physical constraint.
 
 `N_TOP_TRIGGERS` dropped 5 → 3 on 2026-10-09; five overlapping polygons made
 the comparison figure unreadable. Per-scenario geometry is **unchanged** — the
@@ -99,10 +109,10 @@ three commits back (0 of 3540 rows satisfy the post-fix D_wl identity).
 
 Pointing both `--*-csv` flags at the `_v1` pair under **current** code gives
 493 → 408 → 204 → 102, triggers [2859, 5656, 2858, 348, 1068], best IoU
-**0.626** at the default cap and **0.669** at `--max-clusters 2000`, mean
-area/observed 0.70 / 0.77. The default-cap figure was 0.639 before the
-cross-slope θ sampling fix of 2026-10-09; it moved because those polygons are
-cap-bound, so a changed `d_lat` alters which clusters fill the budget. The
+**0.626** at a 500 cap and **0.669** at the default `--max-clusters 2000`, mean
+area/observed 0.70 / 0.77. The 500-cap figure was 0.639 before the cross-slope
+θ sampling fix of 2026-10-09; it moved because those polygons are cap-bound, so
+a changed `d_lat` alters which clusters fill the budget. The
 `--max-clusters 2000` figure is unchanged. Old CSVs do **not** mean old
 numbers — the geometry fixes live in the code, not the data.
 
@@ -283,14 +293,13 @@ pushed it into `GAUME_ASPECT_CAP`. Fixing it cut the Jan 18 Gaume widths from
 cap-saturated). The CSV θ survives only as a fallback numerator when no
 cluster lies in the along-slope sector.
 
-This change is **inert on the default Jan 18 configuration** — IoU is
-bit-identical — because `d_lat = min(gaume_width, A_ca · 0.712)` and the mode
-III speed cap binds on all 5 triggers, so the Gaume width is not what sets
-lateral extent. It matters only with `USE_MODE3_SPEED_CAP = False` or where the
-cap does not bind. Measured on the `_v1` pair with the cap off, `d_lat` becomes
-the Gaume width (39/34/34/112/20 m) and best IoU is 0.646, against 0.669 with
-the cap on. Worth remembering that the Gaume path is effectively dormant on
-this event.
+**Since the speed-cap default flipped to False on 2026-10-10 this is live, not
+dormant.** `d_lat` now *is* the Gaume width (43/40/62 m on the three reference
+triggers), so the θ-ratio path sets lateral extent and anything that moves
+`theta_cross` or `theta_along` moves the flanks. It was inert while the cap was
+on, because `d_lat = min(gaume_width, A_ca · 0.712)` and the cap bound on every
+trigger; the historical record of that era: on the `_v1` pair, cap off gave best
+IoU 0.646 against 0.669 with the cap on.
 
 **Do not pick the estimator by Jan 18 IoU.** Changing θ moves Π₁, hence the
 trigger ranking and the whole filter chain. Argue it from the propagation scale
@@ -330,8 +339,10 @@ assumed from array axes. `tests/test_terrain_direction.py` covers both helpers
 with planar-DEM fixtures at known bearings; neither had coverage before.
 
 Side effect worth knowing: with `theta_cross` sampled correctly the Gaume width
-saturates at `GAUME_ASPECT_CAP` more often, so the **mode III speed cap now
-binds on all 5 Jan 18 triggers rather than 2** and alone sets lateral extent.
+saturates at `GAUME_ASPECT_CAP` more often. While the speed cap was on, that
+made the cap bind on all 5 Jan 18 triggers rather than 2, so it alone set
+lateral extent. **Since the cap went off by default on 2026-10-10 the Gaume
+width is what sets it**, which puts this fix back on the critical path.
 
 Residual polygon lean is the **start-zone KML itself** — its own principal axis
 is 136.4° SE — i.e. the same boundary that caps IoU at 0.830.
@@ -432,7 +443,7 @@ gate is scale-invariant (relative change) and `MIN_PROPAGATION_LAMBDA` = 0.1 m
 is never approached. Only a Λ_III with different *spatial structure* will move
 the flanks. See methods §3.
 
-## Mode III crack-speed cap (implemented)
+## Mode III crack-speed cap (implemented, default OFF since 2026-10-10)
 
 Mode III cracks cap at `c_s` where mode II runs supershear at ~1.6 `c_s`
 (Broberg 1989). A slower crack builds slab tension faster per unit advance, so
@@ -441,24 +452,31 @@ the cross-slope distance to first slab fracture is shorter:
 on ν and the two speed ratios (`arrest_indices.mode3_length_ratio`).
 
 Unlike Λ_III this is an **absolute distance cap**, so it does change results.
-`propagate_crack` composes it with the Gaume width as a minimum:
+When on, `propagate_crack` composes it with the Gaume width as a minimum:
 `d_lat = min(gaume_width, A_ca · 0.712) · size_factor`.
 
-Flags: `USE_MODE3_SPEED_CAP` (default True), `MODE2_SPEED_RATIO` = 1.6,
-`MODE3_SPEED_RATIO` = 1.0. Turning it off is bit-for-bit identical to pre-cap.
+Flags: `USE_MODE3_SPEED_CAP` (**default False**), `MODE2_SPEED_RATIO` = 1.6,
+`MODE3_SPEED_RATIO` = 1.0. CLI `--mode3-speed-cap` / `--no-mode3-speed-cap`.
+On is bit-for-bit identical to the pre-2026-10-10 reference numbers.
 
-**Known asymmetry — read before changing this.** Only the *restrictive* half of
+**Why it is off — the asymmetry, not the IoU.** Only the *restrictive* half of
 mode III is coded. Because G < E′, an equal-strength slab has a *larger* energy
 cap cross-slope (`slab_energy_cap_cross`, G_slab,III = τ_flank²h/2G), which
 pushes the other way — but it needs a flank strength τ_flank that has no
-parameterisation, so it is absent. On Jan 18 the cap binds on 2 of 5 triggers
-and makes the aggregate fit slightly worse (mean IoU 0.567 → 0.561, area ratio
-0.92 → 0.78). That is consistent with implementing one side of a two-sided
-effect; it is left on because Broberg's limit holds independently of this event.
-Do not tune it against Jan 18. See methods §3.
+parameterisation (blocked on a Cam-Clay β ambiguity), so it is absent.
+Applying one side of a two-sided effect biases toward over-arrest, and the
+honest default for a half-implemented term is off.
 
-Lateral *distance* extent is separately set by `estimate_cross_slope_width()`
-(Gaume 2015 / θ ratio, capped at `GAUME_ASPECT_CAP`).
+Jan 18 corroborates without deciding it: cap off gives mean IoU 0.622 and
+area/observed 0.78, against 0.562 and 0.63 with it on — the cap is what makes
+the model under-predict area. Per the no-tuning rule that is corroboration of
+the asymmetry argument, not the justification; on n = 1 the metric cannot carry
+a decision. **To flip back: once τ_flank lands, enable both halves together.**
+Re-enabling this one alone restores the same one-sided bias. See methods §3.
+
+With the cap off, lateral extent is set entirely by `estimate_cross_slope_width()`
+(Gaume 2015 / θ ratio, capped at `GAUME_ASPECT_CAP`), which makes that path
+live — see the θ section above.
 
 ## Commit style
 

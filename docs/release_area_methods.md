@@ -210,7 +210,7 @@ structure* — i.e. if it depends on material properties that vary across
 clusters differently from E′. Injecting a spatially varying Λ_cross does change
 every release area, which confirms the plumbing is live rather than dead.
 
-### Mode III crack-speed cap — implemented
+### Mode III crack-speed cap — implemented, default OFF since 2026-10-10
 
 Mode III (antiplane) cracks cannot exceed the shear wave speed c_s
 (Broberg 1989), whereas upslope mode II cracks run supershear at ȧ ≈ 1.6 c_s.
@@ -237,9 +237,11 @@ arrest occurs at whichever constraint binds first:
 
 d_lat = min( gaume_width , A_ca · 0.712 ) · size_factor
 
-Controlled by `config.USE_MODE3_SPEED_CAP` (default on),
-`MODE2_SPEED_RATIO = 1.6` and `MODE3_SPEED_RATIO = 1.0`. Setting the flag off is
-bit-for-bit identical to the pre-cap behaviour.
+Controlled by `config.USE_MODE3_SPEED_CAP` (**default off since 2026-10-10**,
+see the decision note at the end of this subsection), `MODE2_SPEED_RATIO = 1.6`
+and `MODE3_SPEED_RATIO = 1.0`. CLI `--mode3-speed-cap` / `--no-mode3-speed-cap`.
+Setting the flag off is bit-for-bit identical to the pre-cap behaviour, so the
+current default reproduces the pre-2026-10-06 lateral extents.
 
 **Effect on Jan 18** (`--max-clusters 2000`, observed crown 6 934 m²). The cap
 binds on 2 of 5 triggers; the other three were already Gaume-limited below it:
@@ -270,10 +272,26 @@ event.** Two readings, and this is not resolved:
    coded. Implementing one half of a two-sided effect biases toward
    over-arrest, and the IoU drop is consistent with exactly that.
 
-Per the no-tuning rule the cap is left on, because it follows from Broberg
-(1989) independently of this event; it is not disabled merely because one
-event's IoU fell. But do not read the drop as evidence the cap is wrong — read
-it as evidence that cross-slope arrest is still incompletely modelled.
+**Decision, 2026-10-10: the default is now off.** The cap was left on through
+2026-10-09 on the reasoning that Broberg's limit follows from the physics
+independently of this event, and that one event's IoU should not disable it.
+That reasoning is still right about *the limit*; it was wrong about *this
+implementation*. Reading 2 above is not a caveat to a working term, it is a
+statement that the term as coded is half of a two-sided effect, and the honest
+default for a half-implemented term is off rather than on. Nothing about
+Broberg changed — what changed is the recognition that we are not entitled to
+apply the restrictive half alone.
+
+Jan 18 is consistent with that (mean IoU 0.622 off against 0.562 on; mean
+area/observed 0.78 against 0.63, where the mask-limited ceiling is 0.83), and
+the comparison is what prompted the review, but per the no-tuning rule it is
+corroboration and not the justification — on n = 1 the metric cannot carry a
+decision, as the §6 2×2 demonstrates. **To re-enable: turn both halves on
+together**, this cap plus `slab_energy_cap_cross` with a sourced τ_flank.
+Re-enabling the cap alone would restore exactly the bias this flip removes.
+
+Do not read the earlier IoU drop as evidence the cap is wrong in principle —
+read it as evidence that cross-slope arrest is still incompletely modelled.
 
 If the JGR attribution of lateral arrest to weak-layer heterogeneity is right,
 then neither Λ_III nor the speed cap is the dominant control, and the missing
@@ -295,12 +313,90 @@ on θ(d) = 3.87 + 72/d alone, which is why it kept saturating at
 `GAUME_ASPECT_CAP`. Jan 18 Gaume widths went 55/44/50/155/38 m →
 39/34/34/112/20 m across the two fixes.
 
-Both are nonetheless **inert on the default configuration**: the mode III speed
-cap binds on all 5 Jan 18 triggers, so `d_lat = min(gaume, A_ca·0.712)` is set
-by the cap and the Gaume path never decides the lateral extent. That is itself
-worth recording — the θ-ratio width is dormant on this event, and any future
-work on flank arrest should know it is the speed cap, not Gaume, that is
-active.
+Both were **inert while the speed cap was on**: it bound on all 5 Jan 18
+triggers, so `d_lat = min(gaume, A_ca·0.712)` was set by the cap and the Gaume
+path never decided the lateral extent. **Since the cap default went off on
+2026-10-10 the θ-ratio width is what sets `d_lat`** (43/40/62 m on the three
+reference triggers), so both fixes are now on the critical path and any future
+work on flank arrest is working on the Gaume path, not the speed cap.
+
+### Anisotropic ring growth — implemented and measured, default off
+
+The same speed ratio applied to the *growth* of the flood-fill instead of only
+to a terminal distance cap. If one BFS ring stands for one increment of
+crack-front advance in time, a front running at 1.6 c_s along-slope and c_s
+cross-slope should already be ~1.6× further along-slope when it arrives, so the
+anisotropy belongs in the growth; the isotropic loop advances one cluster hop in
+every direction per ring and leaves the front shape an artifact of cluster
+geometry. A cross-slope candidate is admitted at ring k only once
+
+d_cross ≤ k · ring_step · (MODE3_SPEED_RATIO / MODE2_SPEED_RATIO)
+
+and is otherwise **deferred**, so arrest is still evaluated when the front
+arrives — never skipped because it arrived early. `ring_step` is the median
+adjacent-cluster centroid separation (4.00 m on Jan 18), so the fast axis keeps
+the unmodified BFS rate and only the flanks are held back, at 2.50 m per ring.
+`config.USE_ANISOTROPIC_RINGS` (default **False**), CLI `--anisotropic-rings`.
+
+**The clock must be the along-slope front's, not the global ring counter.**
+Driving the budget from `ring_idx` is self-defeating: flank growth keeps the
+flood-fill alive, which raises the flanks' own budget. Measured with the lateral
+cap removed, that version ran 53 rings to a 132 m budget and dropped 1 cluster;
+counting only rings that admitted an along-slope cluster gives 25 and 62 m, and
+drops 43. Physically the flanks are fed by the advancing crack front, so it is
+the front's progress that buys them time. The clock is still not a pure fall-line
+measure — the ±45° sector counts a diagonal cluster as along-slope, so corner
+growth keeps it ticking after the fall line has stopped.
+
+**Jan 18, six runs** (`--max-clusters 2000`, triggers 2859/5656/6191 identical
+in all six since selection precedes propagation; observed crown 6 934 m², and
+by minimum-rotated-rectangle L = 161.7 m, W = 50.2 m, L/W 3.22, axis 120.5°):
+
+| rings | speed cap | lateral cap | mean area / obs | best IoU | mean IoU | L/W per polygon | major axis |
+|---|---|---|---|---|---|---|---|
+| off | on | Gaume | 0.63 | 0.677 | 0.562 | 2.31 2.33 2.67 | 127 128 123 |
+| **on** | on | Gaume | 0.63 | 0.677 | 0.564 | 2.31 2.33 2.67 | 127 128 123 |
+| off | off | Gaume | 0.78 | 0.693 | 0.622 | 2.31 2.31 1.68 | 127 126 119 |
+| **on** | off | Gaume | 0.74 | 0.693 | 0.632 | 2.31 2.31 1.93 | 127 126 119 |
+| **on** | off | none | 0.85 | 0.642 | 0.605 | 1.89 2.08 1.93 | 119 119 119 |
+| off | off | none | 1.69 | 0.392 | 0.357 | 1.17 1.22 1.05 | 115 119 116 |
+
+Three results, in order of confidence:
+
+1. **Whatever lateral constraint is tighter dominates the rings.** With the
+   speed cap on they are *inert*: mean area 4 362 → 4 377 m² (+0.3%), best IoU
+   identical, per-polygon L/W identical to 3 s.f., because `d_lat = A_ca·0.712`
+   is 29–38 m on these triggers while the ring budget only reaches 50–62 m
+   before the front stops. Under the **current default** (cap off, so `d_lat`
+   is the 43/40/62 m Gaume width) they are no longer inert but still small:
+   mean area 0.78× → 0.74× observed, mean IoU 0.622 → 0.632, and the only
+   polygon that moves materially is trigger 6191, whose L/W goes 1.68 → 1.93.
+   **The existing caps are already more anisotropic than Broberg's ratio** —
+   d_down/d_lat is 2.1–3.1 against 1.6 — so there is little left for a
+   growth-rate anisotropy to do.
+2. **It substitutes for the lateral cap rather than composing with it.** With
+   `d_lat` removed entirely, rings alone cut mean area from 1.69× to 0.85× of
+   observed and lift best IoU from 0.392 to 0.642, recovering most of the cap's
+   effect from a first-principles speed ratio with no free parameter. So the
+   "replace or compose" question is answered: whichever constraint is tighter
+   binds, there is no double-counting of the 1.6, and on this event the cap is
+   the tighter one.
+3. **It does not reproduce the observed elongation.** Rings get the crown *axis*
+   right — 119° on all three polygons against an observed 120.5°, the best of
+   the six runs — but L/W only reaches 1.89–2.08 against an observed 3.22, and
+   the cap-based runs reach 2.31–2.67. Rings trim both flanks symmetrically,
+   which narrows the polygon without lengthening it. Per the crown-aspect test
+   this is the sharper verdict than any of the IoU numbers above, and it says
+   the missing ingredient is not the lateral growth rate.
+
+Left off by default: it is dominated wherever a tighter lateral constraint
+exists, and where it is not dominated it is a *worse* fit on the aspect test
+than the cap it would replace. Note also that the mean-IoU ordering here is
+driven by the lateral-cap choice, not by the rings (+0.002 with the cap on,
++0.010 with it off) — and per the no-tuning rule, a ~0.01 margin on n = 1
+decides nothing either way. Marking the rows against the current default: the
+third row of the table (rings off, cap off, Gaume `d_lat`) **is** the shipped
+configuration, and the first row is the pre-2026-10-10 reference.
 
 ---
 
@@ -1073,20 +1169,12 @@ sections above; these are what remain open.
    that is where release-area work is tracked.
 7. **The ligament bound is still never fed into the BFS**, so it has no IoU of
    its own and the `a₀ ≥ h` guard remains untested by data (§4).
-8. **Anisotropic BFS rings — to investigate.** As `propagate_crack` adds rings
-   to the flood-fill, grow roughly **1.6× further along-slope than cross-slope**
-   per ring, instead of growing isotropically and only clipping afterwards with
-   `d_up` / `d_down` / `d_lat`. The ratio is already in the model as
-   `MODE2_SPEED_RATIO`: mode II runs supershear at ~1.6 c_s while mode III caps
-   at c_s (Broberg 1989). If a ring represents one increment of crack-front
-   advance in *time*, the front should already be ~1.6× further along-slope when
-   it arrives, so the anisotropy belongs in the growth rather than only in a
-   terminal cap — at present the front shape is an artifact of cluster geometry.
-   Two things to settle first: whether this *replaces* the mode III speed cap or
-   composes with it (applying both double-counts the same 1.6), and that the cap
-   currently binds on every Jan 18 trigger and alone sets lateral extent. Judge
-   it against the observed crown's aspect (major axis 119°, L/W 3.51), which is
-   a sharper test than IoU, and do not tune the ratio to this event.
+8. **Anisotropic BFS rings — implemented and measured 2026-10-10, default off.**
+   See §3 "Anisotropic ring growth" for the mechanism and the six-run table.
+   Short version: with the default caps it is **inert** (d_lat binds first), it
+   can **substitute** for the lateral cap rather than compose with it, and it
+   does not reproduce the observed elongation. `config.USE_ANISOTROPIC_RINGS`,
+   CLI `--anisotropic-rings`.
 
 ## 9. References
 

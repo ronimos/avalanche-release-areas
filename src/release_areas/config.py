@@ -241,7 +241,7 @@ MODE3_SPEED_RATIO   = 1.0    # adot / c_s cross-slope cap, Broberg (1989)
 # TO FLIP IT BACK: once tau_flank lands, turn BOTH halves on together —
 # slab_energy_cap_cross plus this cap. Turning this one back on alone would
 # restore the same one-sided bias.
-USE_MODE3_SPEED_CAP = True   # apply the ratio to the lateral distance cap
+USE_MODE3_SPEED_CAP = False  # apply the ratio to the lateral distance cap
 
 # ---- Anisotropic BFS rings (cross-slope growth rate) -------------------
 # The same speed ratio, applied to the *growth* of the flood-fill rather than
