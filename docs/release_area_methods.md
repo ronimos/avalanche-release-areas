@@ -361,6 +361,12 @@ by minimum-rotated-rectangle L = 161.7 m, W = 50.2 m, L/W 3.22, axis 120.5°):
 | **on** | off | none | 0.85 | 0.642 | 0.605 | 1.89 2.08 1.93 | 119 119 119 |
 | off | off | none | 1.69 | 0.392 | 0.357 | 1.17 1.22 1.05 | 115 119 116 |
 
+Reproduce the whole table with `examples/rings_experiment.py` (no zarr needed,
+runs in this repo's venv). The "no lateral cap" rows are not reachable from the
+CLI — the script removes `d_lat` by patching `estimate_cross_slope_width`,
+which is the only way to ask whether ring growth can *substitute* for the
+lateral cap rather than merely compose with it.
+
 Three results, in order of confidence:
 
 1. **Whatever lateral constraint is tighter dominates the rings.** With the
