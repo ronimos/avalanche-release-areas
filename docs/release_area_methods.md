@@ -42,9 +42,9 @@ Check on K_wl: the JGR paper states "K_wl = 0.2 MPa" but also u_c = 0.2 mm at τ
 > directly (doi:10.1029/2025JF008470) for the figures. The two figures that do
 > ship, `energy_cap_check.png` and `release_comparison_20260118.png`, are ours.
 
-**Elastic length (upslope, mode II)**
+**Elastic length (upslope, mode II)** 
 
-Λ = √( E h D_wl / ((1−ν²) G_wl) )
+Λ = √( E h D_wl / ((1−ν²) G_wl))
 
 **Gravitational and residual shear**
 
@@ -60,9 +60,9 @@ Dynamic (Eq. 18), with crack speed ȧ = 1.6 c_s (supershear):
 
 k_x = k_f c_p² / (c_p² + ȧ²), c_p = √(E′/ρ), c_s = √(G/ρ)
 
-![JGR Fig. 3: slab tension vs distance for different crack speeds (a) and k_x/k_f vs speed with the analytical solution (b)](figures/jgr_fig3_dynamic_tension.png)
+![Meloche et al (2025) Fig. 3: slab tension vs distance for different crack speeds (a) and k_x/k_f vs speed with the analytical solution (b)](figures/jgr_fig3_dynamic_tension.png)
 
-*JGR Fig. 3. Faster cracks build slab tension more slowly. At ȧ ≈ c_p the gradient is half the quasi-static value.*
+*Meloche et al (2025) Fig. 3. Faster cracks build slab tension more slowly. At ȧ ≈ c_p the gradient is half the quasi-static value.*
 
 **Tensile lengths (distance to first slab fracture)**
 
@@ -78,9 +78,9 @@ elastic arrest length. (An earlier revision wrote an `A_ca_elastic` column as
 `L_ss · Π₁^1.5`, i.e. silently assuming the constant equals 1, which produced
 medians of ~7 800 m. That column has been removed.)
 
-![JGR Fig. 7: elastic-slab arrest scaling (a) and brittle runs added on top (b)](figures/jgr_fig7_elastic_scaling.png)
+![Meloche et al (2025) Fig. 7: elastic-slab arrest scaling (a) and brittle runs added on top (b)](figures/jgr_fig7_elastic_scaling.png)
 
-*JGR Fig. 7. Elastic-slab collapse (a). In (b), brittle runs fall off the elastic trend, which shows slab fracture changes the arrest mechanism.*
+*Meloche et al (2025) Fig. 7. Elastic-slab collapse (a). In (b), brittle runs fall off the elastic trend, which shows slab fracture changes the arrest mechanism.*
 
 **Arrest length, brittle slab (Eq. 20)**
 
@@ -88,15 +88,15 @@ A_ca / L_t = C · X · √(σt/τg), X = τg / (θ Λ √(1+δ))
 
 The paper gives this as a proportionality. C = 0.045 is my two-point fit to the Fig. 8 runs and is the code default.
 
-![JGR Fig. 10: brittle-slab arrest scaling](figures/jgr_fig10_brittle_scaling.png)
+![Meloche et al (2025) Fig. 10: brittle-slab arrest scaling](figures/jgr_fig10_brittle_scaling.png)
 
-*JGR Fig. 10. Brittle-slab scaling with a slope-1 reference line.*
+*Meloche et al (2025) Fig. 10. Brittle-slab scaling with a slope-1 reference line.*
 
 C = 0.045 verified by direct computation from the Fig. 8 inputs (see calibration table in §3 and `test_arrest_indices.py`). The arithmetic: τg = 702 Pa, Λ = 0.663 m, L_t = 15.67 m; θ = 30 gives A_ca = 72.7 m (observed 74 m); θ = 150 gives 14.5 m (observed 14 m). The dashed line in Fig. 10a is a 1:1 reference line through the data, not a separate best-fit; no discrepancy remains.
 
-![JGR Fig. 9: arrest length vs θ for σt, E and L_ss](figures/jgr_fig9_sensitivity.png)
+![Meloche et al (2025) Fig. 9: arrest length vs θ for σt, E and L_ss](figures/jgr_fig9_sensitivity.png)
 
-*JGR Fig. 9. A_ca falls roughly as 1/θ. Higher σt and lower E lengthen arrest. Crosses are single-fracture arrests, circles multiple.*
+*Meloche et al (2025) Fig. 9. A_ca falls roughly as 1/θ. Higher σt and lower E lengthen arrest. Crosses are single-fracture arrests, circles multiple.*
 
 **Release size index (ISSW 2026, preliminary).** The ISSW 2026 paper defines a_t as the distance to the first slab fracture (obtained directly from MPM simulations). In the code, a_t is approximated as L_dyn (dynamic tensile length = σt/k_x), which is the analytical prediction for where the first fracture occurs.
 
@@ -145,13 +145,13 @@ R absorbs dynamic effects and the approximations above. Two options are provided
 - `R = 0.48`: fitted to the two Fig. 8 runs (default).
 - `R = 'dynamic'`: R = k_x/k_f at ȧ = 1.6 c_s (0.53 for ν = 0.3). This is a speculative physical interpretation. It lands within 10% of the fit, which may be coincidence.
 
-![JGR Fig. 8: two brittle runs, θ = 30 and 150 Pa/m](figures/jgr_fig8_brittle_runs.png)
+![Meloche et al (2025) Fig. 8: two brittle runs, θ = 30 and 150 Pa/m](figures/jgr_fig8_brittle_runs.png)
 
-*JGR Fig. 8. Weak-layer strength and shear (top), slab tension and slab fractures (middle), crack speed (bottom). Arrest at 94 m (θ = 30) and 34 m (θ = 150).*
+*Meloche et al (2025) Fig. 8. Weak-layer strength and shear (top), slab tension and slab fractures (middle), crack speed (bottom). Arrest at 94 m (θ = 30) and 34 m (θ = 150).*
 
-![JGR Fig. 11: Jim Bay Corner field-gradient run](figures/jgr_fig11_jbc.png)
+![Meloche et al (2025) Fig. 11: Jim Bay Corner field-gradient run](figures/jgr_fig11_jbc.png)
 
-*JGR Fig. 11. Field gradient (θ ≈ 15 Pa/m) with δ = 1. Crack speed drops to zero near 94 m in panel (d).*
+*Meloche et al (2025) Fig. 11. Field gradient (θ ≈ 15 Pa/m) with δ = 1. Crack speed drops to zero near 94 m in panel (d).*
 
 ### Check against Meloche et al. (2025)
 
@@ -1124,7 +1124,7 @@ the paper's θ validity floor, which remains the strongest open objection to the
 - **Λ / thickness discontinuity factors (0.20 / 0.30)**: uncalibrated heuristics; the only lateral/upslope continuity control once the distance caps are satisfied.
 - **D_wl fallback (0.04 m)**: Only used when `wl_thickness` is NaN. Most clusters have measured values (0.022–0.154 m range). The fallback underestimates K_wl by 2×, inflating τp*.
 - **G_WL (0.2 MPa)**: Not independently measured. Changing it scales K_wl and τp* proportionally. Untestable from SNOWPACK alone.
-- **C (0.045)**: Two-run fit from JGR Fig. 8. Jan 18 slope is NE-facing vs. the 35° modeled slope; no re-calibration done or recommended.
+- **C (0.045)**: Two-run fit from Meloche et al (2025) Fig. 8. Jan 18 slope is NE-facing vs. the 35° modeled slope; no re-calibration done or recommended.
 - **R_FIT (0.48)**: Same. Two calibration runs.
 
 ---
