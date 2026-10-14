@@ -875,7 +875,7 @@ to be kept it should be expressed relative to the local τg distribution rather
 than in Pa — but see §6 on why the percentile must not be chosen from this
 event.
 
-**Safety cap.** `config.MAX_BFS_CLUSTERS` (default 500) bounds the region size.
+**Safety cap.** `config.MAX_BFS_CLUSTERS` (default 2000) bounds the region size.
 This is not physics. When the cap binds, the run prints a `[CAP-BOUND]`
 warning and the polygon is an artefact of the cap. On Jan 18, 3 of 5 triggers
 are cap-bound at the default; the region sizes saturate by about 1 000
