@@ -505,11 +505,14 @@ treats as a crack.
 **(e) Fracture toughness K_Ic(ρ).** Selectable, each option citing its own
 measurement (`k_ic`, `K_IC_RELATIONS`). Neither available relation is a
 slab-tension measurement at avalanche scale, which is the central caveat on
-everything in (f).
+everything in (f). The one avalanche-scale measurement of dry-snow slab
+tensile and shear fracture toughness we are aware of — McClung & Schweizer
+(2006), from field data on ~300 avalanches — is not wired into `k_ic()` or
+compared against the ligament bound anywhere in this pipeline; see §8 item 6.
 
 | Option | Formula | Source and caveat |
 |---|---|---|
-| `schweizer2004` (**default**) | K_Ic = A₄ (ρ/ρ_ice)^exp / √d_max, A₄ = 0.35 kPa·m | Schweizer, Michot & Kirchner (2004) *Ann. Glaciol.* 38, 1–8, **Eq. 8** (r = 0.98), which the paper states replaces its own Eqs. 5 and 6 by folding in the d_max^(−1/2) dependence — the latter consistent with ice (Petrenko & Whitworth 1999). Notched cantilever beams in a cold laboratory. **The printed Eq. 8 exponent is 1.9**; we default to 2.0 (`SCH2004_EXP`; the abstract says "about 2"), which is 11% low at ρ = 300 and 17% low at ρ = 150. `SCH2004_EXP_PAPER` restores 1.9. |
+| `schweizer2004` (**default**) | K_Ic = A₄ (ρ/ρ_ice)^exp / √d_max, A₄ = 0.35 kPa·m | Schweizer, Michot & Kirchner (2004) *Ann. Glaciol.* 38, 1–8, **Eq. 8** (r = 0.98), which the paper states replaces its own Eqs. 5 and 6 by folding in the d_max^(−1/2) dependence — the latter consistent with ice (Petrenko & Whitworth 1999). Notched cantilever beams in a cold laboratory. **The printed Eq. 8 exponent is 1.9**; we default to 1.9 (`SCH2004_EXP`, since 2026-10-09). `SCH2004_EXP_ROUND` = 2.0 restores the earlier in-house rounding of the abstract's "about 2", which runs 11% low at ρ = 300 and 17% low at ρ = 150 relative to the printed exponent. |
 | `kirchner2000` | K_Ic = 7.84 (ρ/ρ_ice)^2.3 kPa·m^0.5 | Kirchner et al. (2000) *Phil. Mag. A* 80(5). **Treat as a LOWER BOUND**: these are *apparent* toughnesses from small cantilever beams, so they carry the small-specimen size effect, and a slab-scale crack is far larger than the beams. |
 | `borstad2013` | — | **gated, raises `NotImplementedError`.** Bronze OA at Wiley only, no repository copy, so the regression has never been sourced and quoted back. |
 
@@ -647,7 +650,10 @@ All the physics lives in `src/release_areas`; everything in `examples/` is a
 thin driver over it, so none of these scripts carries a parameter of its own.
 They need xarray/zarr, which are **not** in this repo's venv — run them with
 avachain's interpreter, which also resolves `release_areas` to this working
-tree:
+tree. `AVACHAIN_HOME` (default `~/avachain`) is your avachain checkout; set it
+if yours lives elsewhere. The scripts below additionally read `LIG_ZARR` for
+the zarr path itself (default `$AVACHAIN_HOME/snowpack/little_prof/output/slope_snowpack.zarr`)
+and `LIG_OUT_DIR` for output:
 
 | Script | Produces |
 |---|---|
@@ -657,10 +663,11 @@ tree:
 | `examples/compute_indices_from_xsnow.py` | illustrative only — placeholder paths, and it deliberately does **not** write to `data/little_prof/features`. |
 
 ```bash
-/home/ron/avachain/.venv/bin/python -I examples/regenerate_jan18_reference_csvs.py
-LIG_OUT_DIR=/path/to/keep /home/ron/avachain/.venv/bin/python -I \
+AVACHAIN_PY="${AVACHAIN_HOME:-$HOME/avachain}/.venv/bin/python"
+"$AVACHAIN_PY" -I examples/regenerate_jan18_reference_csvs.py
+LIG_OUT_DIR=/path/to/keep "$AVACHAIN_PY" -I \
     examples/spacetime_ligament_pass.py 24       # ~3 min on 24 workers
-LIG_OUT_DIR=/path/to/keep /home/ron/avachain/.venv/bin/python -I \
+LIG_OUT_DIR=/path/to/keep "$AVACHAIN_PY" -I \
     examples/spacetime_ligament_stats.py
 ```
 
@@ -987,46 +994,58 @@ since Π₁ ∝ 1/θ. For the pre-2026-10-09 figures, use the `_v1` CSV pair:
 (An earlier revision of this table attributed 493 → 408 → 204 all to the first
 filter and reported 51 final candidates; both were wrong.)
 
-Top-3 scenarios at size_factor = 1.0, with the default safety cap
-(`--max-clusters 500`). Depth is the mean `slab_thickness` inside the polygon;
-volume is the integral of that depth over the release area.
+**Regenerated 2026-10-18 under current defaults** (`MAX_BFS_CLUSTERS = 2000`,
+`USE_MODE3_SPEED_CAP = False`). Earlier revisions of this section carried two
+tables here — a cap-bound one at the then-default `--max-clusters 500`, and an
+"uncapped" one at `--max-clusters 2000` with the mode III speed cap still on
+(pre-2026-10-10; see §3). Both defaults have since changed, region sizes
+saturate by ~1 000 clusters (§5), so the safety cap no longer binds at 2000 and
+there is only one physically-meaningful table to report. Depth is the mean
+`slab_thickness` inside the polygon; volume is the integral of that depth over
+the release area.
 
-| Scenario | Trigger cid | Sk38 | A_ca (m) | Area (m²) | Depth (m) | Volume (m³) | IoU | Cap-bound |
-|---|---|---|---|---|---|---|---|---|
-| scenario_001 | 2859 | 0.72 | 54 | 5 168 | 1.56 | 5 455 | **0.669** ← best | yes |
-| scenario_002 | 5656 | 0.72 | 50 | 4 384 | 1.58 | 4 544 | 0.580 | no |
-| scenario_003 | 6191 | 0.72 | 40 | 3 112 | 1.68 | 2 758 | 0.429 | no |
+| Scenario | Trigger cid | Sk38 | A_ca (m) | Area (m²) | Depth (m) | Volume (m³) | IoU |
+|---|---|---|---|---|---|---|---|
+| scenario_001 | 2859 | 0.72 | 53.7 | 5 897 | 1.54 | 6 035 | **0.693** ← best |
+| scenario_002 | 5656 | 0.72 | 50.1 | 4 791 | 1.56 | 5 126 | 0.636 |
+| scenario_003 | 6191 | 0.72 | 40.1 | 5 504 | 1.49 | 5 939 | 0.536 |
 
-**Summary:** observed 6 934 m² · modelled P50 4 384 m² · ratio 0.63 · best IoU 0.669 · mean IoU 0.559.
+**Summary:** observed 6 934 m² · modelled mean 5 397 m² · ratio 0.78 · best IoU
+0.693 · mean IoU 0.622.
 
-Because 3 of the 5 polygons are cap-bound, these are not purely physical
-results. Letting the arrest criteria terminate the flood-fill
-(`--max-clusters 2000`; identical for any value ≥ 1000) gives:
+All three polygons overlap the observed crown (IoU 0.54–0.69); none is
+cap-bound. This table is numerically identical to the "rings off / speed cap
+off / Gaume" row of §3's anisotropic-rings six-run table, reproduced
+independently here via `generate_scenarios.py` rather than
+`examples/rings_experiment.py`.
 
-| Scenario | Trigger cid | A_ca (m) | Area (m²) | Depth (m) | Volume (m³) | IoU |
-|---|---|---|---|---|---|---|
-| scenario_001 | 2859 | 53.7 | 5 591 | 1.57 | 5 644 | **0.677** ← best |
-| scenario_002 | 5656 | 50.1 | 4 384 | 1.58 | 4 544 | 0.580 |
-| scenario_003 | 6191 | 40.1 | 3 112 | 1.68 | 2 758 | 0.429 |
+**Reproducing the pre-2026-10-10 numbers.** The two tables this section used
+to carry are still exactly reproducible, by passing the old defaults back in
+explicitly: `--mode3-speed-cap --max-clusters 500` gives scenario_001/002/003
+areas 5 168 / 4 384 / 3 112 m² (IoU 0.669/0.580/0.429, scenario_001 cap-bound,
+mean IoU 0.559, ratio 0.63); `--mode3-speed-cap` alone (cap no longer binds
+even at 500 for the other two triggers, and not at all at 2000) gives
+5 591 / 4 384 / 3 112 m² (IoU 0.677/0.580/0.429, mean IoU 0.562, ratio 0.63).
+Neither is wrong — they describe a configuration this repository no longer
+ships by default; see §3 "Mode III crack-speed cap" for why it was turned off.
 
-**Summary:** observed 6 934 m² · modelled P50 4 384 m² · ratio 0.63 · best IoU
-0.677 · mean IoU 0.562 · mean area/observed 0.63.
-
-Uncapped, all three polygons overlap the observed crown (IoU 0.43–0.68), and
-each is individually smaller than the crown. scenario_003 (6191) is the weak
-one at 0.429.
-
-**On the mean area ratio, and why it is not the 0.82 quoted in the 2×2 below.**
-`N_TOP_TRIGGERS` dropped 5 → 3 on 2026-10-09 (the figure was unreadable at
-five). Per-scenario geometry is unaffected — these three rows are bit-identical
-to the first three of the five-trigger run — but the *aggregate* is not, because
-the two dropped scenarios (5817 and 348) were the two largest, at area ratios
-1.03 and 1.20. Over five triggers the mean area/observed is **0.82**, which is
-the number that matches the **0.83** a perfect mask-limited model implies (17%
-of the crown lies outside the start-zone KML and the BFS hard-rejects outside
-it) and which the 2×2 below uses as its scale check. Over three it is 0.63.
-The 2×2 was run at `--n-triggers 5` and its figures should be read that way;
-reproduce it with that flag, not the current default.
+**On the mean area ratio, and why it is not the 0.82 quoted in the 2×2
+below.** `N_TOP_TRIGGERS` dropped 5 → 3 on 2026-10-09 (the figure was
+unreadable at five). Per-scenario geometry for the three shared triggers is
+unaffected by that count change alone, but the *aggregate* is, because the two
+dropped scenarios (5817 and 348) were the two largest. Under the
+**pre-2026-10-10 config** (speed cap on) the five-trigger mean area/observed
+was 0.82 — matching the 0.83 a perfect mask-limited model implies (17% of the
+crown lies outside the start-zone KML and the BFS hard-rejects outside it) —
+which is what the 2×2 below uses as its scale check. Re-running the same five
+triggers **under current defaults** (speed cap off) instead gives area ratios
+1.04 and 1.82 for 5817 and 348 respectively (trigger 348's Gaume lateral width
+is no longer capped at 165 m), pushing the five-trigger mean area/observed to
+**1.04**, not 0.82. So the scale-check argument the 2×2 section leans on was
+computed under a configuration this repository no longer ships, and does not
+hold under current defaults — see the caveat appended to that section, and
+§8 item 9. The current three-trigger ratio is 0.78 (table above), not 0.63;
+0.63 was itself a speed-cap-on number.
 
 A further caution: at three triggers the cut falls *inside* a three-way Sk38
 tie at 0.72, so the selection is decided by tie ordering rather than by any
@@ -1034,7 +1053,7 @@ margin — see §8 item 5.
 
 ![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown. Coloured outlines: three modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
 
-*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Regenerated 2026-10-09 from the reference CSVs with `--max-clusters 2000` and the default three triggers, so it shows the uncapped table above — the default-cap run is cap-bound on 3 of 5 and is not a physical result. Plotted equal-aspect; before the 2026-10-09 fix the axes were `aspect='auto'`, which stretched east against north by 1.21× and made every bearing read off the figure wrong by −4.6°.*
+*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Regenerated 2026-10-18 from the reference CSVs with the current defaults (`--max-clusters` and `--mode3-speed-cap` both left at their shipped values — see the table above) and the default three triggers; none of the three polygons is cap-bound. Plotted equal-aspect; before a 2026-10-09 fix the axes were `aspect='auto'`, which stretched east against north by 1.21× and made every bearing read off the figure wrong by −4.6°.*
 
 To reproduce:
 
@@ -1049,7 +1068,7 @@ python -m release_areas.generate_scenarios \
     --out-dir       outputs/little_prof
 ```
 
-Add `--max-clusters 2000` to let the arrest criteria, rather than the safety cap, bound the regions.
+`--max-clusters` already defaults to 2000, past the ~1 000-cluster saturation point (§5), so the arrest criteria rather than the safety cap already bound the regions with no extra flag; pass `--max-clusters 500 --mode3-speed-cap` to reproduce the old capped behaviour instead.
 
 Output: `outputs/little_prof/release_comparison.png` — modelled release polygons overlaid on DEM hillshade with per-trigger IoU. Any `avalanche_release_area_*.geojson` file added to `data/little_prof/boundaries/` is automatically loaded and shown on the plot in a distinct colour.
 
@@ -1065,6 +1084,11 @@ Measured 2026-10-09, all four runs under identical code at
 `--max-clusters 2000`, nothing cap-bound. Two factors: the feature CSVs
 (pre-fix element means + `project_fit` E, vs thickness-weighted means + summed
 layer thicknesses + `vanherwijnen2016` E) and `config.THETA_ESTIMATOR`.
+**`USE_MODE3_SPEED_CAP` was still on by default on this date** — the flip to
+off is dated 2026-10-10 in §3 — so every number in this subsection (including
+the 0.82/0.83 scale check below) reflects that older default, not the one this
+repository currently ships. This table has not been re-run since; see the
+caveat after the scale check.
 
 Run at `--n-triggers 5`, the default at the time; the current default is 3.
 Use that flag to reproduce these rows — the per-scenario geometry is unchanged
@@ -1110,6 +1134,20 @@ a θ neighbourhood matched to L_ss — plus one independent check that is *scale
 rather than overlap: mean area/observed lands at **0.82** against the **0.83**
 a perfect mask-limited model implies, and only this configuration passes it.
 
+**This scale check does not survive the 2026-10-10 default change, and has not
+been re-verified.** Re-running the same five triggers under current defaults
+(`USE_MODE3_SPEED_CAP = False`) gives mean area/observed **1.04**, not 0.82 —
+trigger 348's Gaume lateral width is no longer capped, inflating its area from
+a 1.20× to a 1.82× ratio (see §6 "BFS scenario pipeline results"). The
+component-level sourcing argument (van Herwijnen 2016, the thickness identity,
+the θ-neighbourhood scale match) is independent of the speed cap and still
+holds; the numerical 0.82≈0.83 agreement specifically does not, and should be
+treated as an open item rather than corroboration until the full 2×2 is
+re-measured under current defaults — see §8 item 9. Recomputing it was out of
+scope for this pass: it is a new result, not a documentation fix, and redoing
+it under time pressure risks exactly the kind of single-event tuning this
+document otherwise argues against.
+
 Caveats on record: the trigger set is not stable across the factors
 (2858/1068 → 6191/5817), so this is not a controlled comparison; trigger 6191
 is weak at 0.429; and under `plane_fit` 97.2% of start-zone clusters sit below
@@ -1119,11 +1157,11 @@ the paper's θ validity floor, which remains the strongest open objection to the
 ### Hardcoded parameter sensitivity
 
 - **δ**: The dominant sensitivity. For DH weak layers δ = 0 is better-supported, but `config.DELTA` **ships as 1.0** and `compute_meloche_features` reads it from there. Changing the default is a one-line edit in `config.py`; it is not a function argument, and the two values are not reconciled anywhere in this repo.
-- **`MAX_BFS_CLUSTERS` (500)**: a safety cap, not physics. Binding on 3 of 5 Jan 18 triggers at the default and worth ~20% in area and ~0.03 in IoU. Region size saturates by ~1 000 clusters.
+- **`MAX_BFS_CLUSTERS`**: a safety cap, not physics, now **2000** by default (raised from 500 on 2026-10-18 to match the saturation point below). At the old 500 default it bound 3 of 5 Jan 18 triggers, worth ~20% in area and ~0.03 in IoU; at 2000 nothing is cap-bound (region size saturates by ~1 000 clusters), so the cap is now inert on this dataset — see §6 "BFS scenario pipeline results" for the old-vs-new numbers.
 - **`TAU_G_ABS_FLOOR` (350 Pa)**: the binding driving-stress gate inside the BFS. Uncalibrated.
 - **Λ / thickness discontinuity factors (0.20 / 0.30)**: uncalibrated heuristics; the only lateral/upslope continuity control once the distance caps are satisfied.
 - **D_wl fallback (0.04 m)**: Only used when `wl_thickness` is NaN. Most clusters have measured values (0.022–0.154 m range). The fallback underestimates K_wl by 2×, inflating τp*.
-- **G_WL (0.2 MPa)**: Not independently measured. Changing it scales K_wl and τp* proportionally. Untestable from SNOWPACK alone.
+- **G_WL (0.2 MPa)**: Not independently measured by this project. `config.py` attributes it to cold-lab shear tests by Reiweger et al. (2010), citing Meloche et al. (2025) Table 1 / p.7 as the source of that attribution — **this review could not independently confirm it**: the publicly readable preprint (arXiv:2406.01360v1) does not cite a Reiweger paper anywhere, and the final peer-reviewed JGR text was not accessible to check page 7 directly. Verify against the published PDF before relying on the citation (see §9). Either way, the value is untestable from SNOWPACK alone, and changing it scales K_wl and τp* proportionally.
 - **C (0.045)**: Two-run fit from Meloche et al (2025) Fig. 8. Jan 18 slope is NE-facing vs. the 35° modeled slope; no re-calibration done or recommended.
 - **R_FIT (0.48)**: Same. Two calibration runs.
 
@@ -1143,6 +1181,7 @@ the paper's θ validity floor, which remains the strongest open objection to the
 3. Check whether R is constant across θ, σt, E, L_ss and δ. If it is, the energy-cap criterion holds in the simulated range.
 4. Compare the σt dependence of A_ca against Eq. 20.
 5. Repeat on the TARP cross-slope runs with `slab_energy_cap_cross` once a flank strength is chosen.
+6. Compare the ligament bound's σc predictions (§4f) against McClung & Schweizer (2006), the one avalanche-scale (not cantilever-beam) measurement of dry-snow slab tensile and shear fracture toughness available (~300 field avalanches). Neither `schweizer2004` nor `kirchner2000` is this kind of measurement, and `σc` is currently compared against nothing — see §4(e).
 
 ### Open items carried forward
 
@@ -1181,18 +1220,37 @@ sections above; these are what remain open.
    can **substitute** for the lateral cap rather than compose with it, and it
    does not reproduce the observed elongation. `config.USE_ANISOTROPIC_RINGS`,
    CLI `--anisotropic-rings`.
+9. **The §6 2×2's mean-area/observed scale check (0.82 ≈ 0.83) was measured
+   2026-10-09, one day before `USE_MODE3_SPEED_CAP` defaulted to off, and has
+   not been re-measured since.** Re-running the same five Jan 18 triggers under
+   current defaults gives 1.04, not 0.82, because trigger 348's Gaume lateral
+   width is no longer capped. The component-level sourcing argument for
+   adopting `vanherwijnen2016` + thickness-weighting + `plane_fit` is
+   independent of the speed cap and stands on its own; the numerical scale
+   agreement that was offered as one further, independent check does not
+   currently hold and needs the full 2×2 re-run under current defaults before
+   it can be cited again — see §6 "The 2×2" caveat.
 
 ## 9. References
 
-- Meloche, F., Bobillier, G., Guillet, L., Gauthier, F., Langlois, A., & Gaume, J. (2025). Modeling crack arrest in snow slab avalanches: Toward estimating avalanche release sizes. *JGR Earth Surface*, 130(12), e2025JF008470. https://doi.org/10.1029/2025JF008470
+- Meloche, F., Bobillier, G., Guillet, L., Gauthier, F., Langlois, A., & Gaume, J. (2025). Modeling crack arrest in snow slab avalanches: Toward estimating avalanche release sizes. *JGR Earth Surface*, 130(12), e2025JF008470. https://doi.org/10.1029/2025JF008470 — the primary source for §§1–3; preprint at arXiv:2406.01360.
 - Meloche, F., Trottet, B., Bobillier, G., & Gaume, J. (2026). Slab fractures during dynamic crack propagation in dry-snow slab avalanches. *Proc. ISSW*, Whistler, 1961–1966. https://doi.org/10.15788/1790098485
 - Meloche, F., et al. (2026). TARP final technical report: Vertical avalanche defense structures.
-- McClung, D. M., & Schweizer, J. (2006). Fracture toughness of dry snow slab avalanches from field measurements. *JGR Earth Surface*. https://doi.org/10.1029/2005JF000403
-- Broberg, K. B. (1989). The near-tip field at high crack velocities. In *Structural Integrity*, Springer.
-- van Herwijnen, A., Gaume, J., Bair, E. H., Reuter, B., Birkeland, K. W., & Schweizer, J. (2016). Estimating the effective elastic modulus and specific fracture energy of snowpack layers from field experiments. *Journal of Glaciology*, 62(236), 997–1007.
+- Gaume, J., Chambon, G., Eckert, N., Naaim, M., & Schweizer, J. (2015). Influence of weak layer heterogeneity and slab properties on slab tensile failure propensity and avalanche release area. *The Cryosphere*, 9, 795–804. https://doi.org/10.5194/tc-9-795-2015 — source of `estimate_cross_slope_width` (the "Gaume width") in `release_geometry.py`, cited there and in `scenario_writer.py`; referenced throughout §3 and §5 but previously missing from this list.
+- Veitinger, J., Purves, R. S., & Sovilla, B. (2016). Potential slab avalanche release area identification from estimated winter terrain: a multi-scale, fuzzy logic approach. *Natural Hazards and Earth System Sciences*, 16, 2211–2225. https://doi.org/10.5194/nhess-16-2211-2016 — cited in `release_geometry.py`'s module docstring and `scenario_writer.py` as (joint) source of the downslope/stauchwall arrest method; its 28–60° slope range is the likely origin of `STAUCHWALL_DEG` = 28°. Previously cited only in code, missing from this list.
+- Maggioni, M., & Gruber, U. (2003). The influence of topographic parameters on avalanche release dimension and frequency. *Cold Regions Science and Technology*, 37, 407–419. — cited in `release_geometry.py`'s module docstring alongside Veitinger (2016) and Bühler et al. (2013) for the downslope arrest method; previously missing from this list.
+- Bühler, Y., Kumar, S., Veitinger, J., Christen, M., Stoffel, A., & Snehmani (2013). Automated identification of potential snow avalanche release areas based on digital elevation models. *Natural Hazards and Earth System Sciences*, 13, 1321–1335. https://doi.org/10.5194/nhess-13-1321-2013 — cited alongside the above; previously missing from this list.
+- Perzl, F. (2007). *(cited in `release_geometry.py`'s module docstring, alongside "Swiss ALIP/PRA" guidance, as part of the downslope/stauchwall arrest method's provenance; neither has been independently located or verified by this review — flag for the author to source or remove before relying on it.)*
+- McClung, D. M., & Schweizer, J. (2006). Fracture toughness of dry snow slab avalanches from field measurements. *JGR Earth Surface*, 111, F04008. https://doi.org/10.1029/2005JF000403 — the one avalanche-scale (not cantilever-beam) dry-snow slab tensile/shear fracture-toughness measurement we are aware of (~300 field avalanches), not currently compared against the ligament bound of §4(f); see §8 item 6.
+- Broberg, K. B. (1989). The near-tip field at high crack velocities. In *Structural Integrity*, Springer. — the mode III (antiplane) crack-speed bound c_s behind `MODE3_SPEED_RATIO`.
+- Trottet, B., Simenhois, R., Bobillier, G., Bergfeld, B., van Herwijnen, A., Jiang, C., & Gaume, J. (2022). Transition from sub-Rayleigh anticrack to supershear crack propagation in snow avalanches. *Nature Physics*, 18, 1094–1098. https://doi.org/10.1038/s41567-022-01662-4 — source of the 1.6 c_s supershear speed cited in `arrest_indices.py` for `MODE2_SPEED_RATIO`; previously missing from this list despite being named inline in the code comments.
+- van Herwijnen, A., Gaume, J., Bair, E. H., Reuter, B., Birkeland, K. W., & Schweizer, J. (2016). Estimating the effective elastic modulus and specific fracture energy of snowpack layers from field experiments. *Journal of Glaciology*, 62(236), 997–1007. — source of the default E(ρ) relation, Eq. 8.
+- Sigrist, C. (2006). *Measurement of fracture mechanical properties of snow and application to dry snow slab avalanche release.* PhD thesis, ETH Zürich, No. 16736.
+- Sigrist, C., & Schweizer, J. (2007). Critical energy release rates of weak snowpack layers determined in field experiments. *Geophysical Research Letters*, 34, L03502. https://doi.org/10.1029/2006GL028576 — with van Herwijnen (2016) above, cited in `arrest_indices.py` as literature that measures weak-layer energy release rates rather than slab K_Ic (§4e/f caveat); both were previously missing from this list.
 - Schweizer, J., Michot, G., & Kirchner, H. O. K. (2004). On the fracture toughness of snow. *Annals of Glaciology*, 38, 1–8. https://doi.org/10.3189/172756404781814906 — source of the default K_Ic(ρ), Eq. 8.
 - Kirchner, H. O. K., Michot, G., & Schweizer, J. (2000). Fracture toughness of snow in tension. *Philosophical Magazine A*, 80(5). — the `kirchner2000` lower bound.
 - Jamieson, J. B., & Johnston, C. D. (1990). In-situ tensile tests of snowpack layers. *Journal of Glaciology*, 36(122), 102–106. — basis for the facet tensile knockdown `FACET_STRENGTH_FACTOR`.
+- Reiweger, I., Schweizer, J., Ernst, J. D., & Dual, J. (2010). Load-controlled test apparatus for snow. *Cold Regions Science and Technology*, 62, 119–125. — candidate source for `config.G_WL` = 0.2 MPa; Meloche et al. (2025) Table 1 / p.7 reportedly attribute that value to cold-lab shear tests by "Reiweger et al. (2010)," and this is the best-matching candidate (multi-author, shear-apparatus paper) among that year's Reiweger publications, but **the attribution is not independently confirmed** — see §4 and §6. Verify against the published Meloche (2025) PDF before citing this as settled.
 - El Haddad, M. H., Topper, T. H., & Smith, K. N. (1979). Prediction of non-propagating cracks. *Engineering Fracture Mechanics*, 11(3), 573–584. — the short-crack correction and intrinsic flaw size a₀.
 - Tada, H., Paris, P. C., & Irwin, G. R. (2000). *The Stress Analysis of Cracks Handbook* (3rd ed.). ASME. — single-edge-notch tension F(a/h) and the Feddersen secant form.
 - Petrenko, V. F., & Whitworth, R. W. (1999). *Physics of Ice*. Oxford University Press. — the d_max^(−1/2) toughness dependence in ice that Schweizer et al. (2004) invoke.
