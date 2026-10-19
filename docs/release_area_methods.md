@@ -243,7 +243,59 @@ structure* — i.e. if it depends on material properties that vary across
 clusters differently from E′ (a per-cluster ν, or the bending-stiffness
 alternative Gaume flags above, would both qualify). Injecting a spatially
 varying Λ_cross does change every release area, which confirms the plumbing
-is live rather than dead.
+is live rather than dead — that was an arbitrary perturbation used only to
+prove the code path is reachable, not a claim about a realistic alternative.
+The probe below is the realistic version of that test.
+
+**Can antiplane-vs-bending even be told apart with this pipeline? A first
+probe (2026-10-18), not sourced from Gaume, not a claim about which regime
+is correct.** The constant-ratio proof above was checked directly, not just
+algebraically: on the committed Jan 18 data, `Lambda_cross / Lambda` is
+*exactly* 0.591608 for all 3 510 clusters that carry it (std ≈1e-17, pure
+floating-point noise), and running `USE_MODE3_LAMBDA` True vs. False through
+the actual BFS gives a byte-identical `scenario_summary.csv`. So the
+antiplane formula, exactly as confirmed, genuinely cannot be tested against
+this event through this pipeline — there is nothing for a uniform rescaling
+to discriminate.
+
+That motivates the obvious next question: would Gaume's other candidate —
+bending-dominated deformation, for which he gave no formula — behave any
+differently? As a probe only, we tried the standard beam-on-elastic-foundation
+construction (Hetényi): bending stiffness D = E h³/(12(1−ν²)), foundation
+modulus K_wl = G_wl/D_wl (already defined in §1), L_bend = (4D/K_wl)^(1/4).
+Unlike the antiplane ratio, L_bend/Λ_II is **not** constant — it ranges
+0.31–0.98 across the Jan 18 start zone (vs. antiplane's flat 0.59) and
+correlates with slab thickness h (r = 0.77, since bending stiffness scales as
+h³ against Λ_II's h^0.5). Its overall magnitude is similar to the antiplane
+value and shorter than Λ_II (median 1.56 m vs. Λ_II's 2.78 m), consistent with
+Gaume's expectation that the cross-slope length should be the shorter one
+either way.
+
+Wired into the BFS exactly like `Lambda_cross` normally is, this genuinely
+spatially-varying alternative moves scenario_001's area by +6 m² (5 897 →
+5 903, +0.1%) and its IoU by +0.0008; scenario_002 and scenario_003 are
+unchanged to the pixel. So even a formula that *does* carry real spatial
+structure barely moves this event's modeled footprint — a strikingly small
+effect for inputs with that much spread. The likely reason is architectural,
+not physical: `Lambda_cross` only feeds the Λ-discontinuity continuity gate
+inside `propagate_crack` (§5), which the gate-firing table shows is a
+secondary constraint next to the lateral-distance cap (driven by the separate
+Gaume θ-ratio method, not Λ_cross at all) and the start-zone mask. Getting the
+cross-slope elastic length right — whichever regime turns out correct — is
+unlikely to move *this* pipeline's footprint much unless it is also wired
+into the lateral extent control itself, which it currently is not. (One loose
+end: the per-direction cluster tallies this run printed showed small,
+nominally-unrelated differences in the *upslope* count too, ±1–2 clusters on
+two of the three triggers, despite upslope arrest depending only on A_ca, not
+Λ_cross. The final rasterized areas were unaffected, so this reads as a
+BFS attribution/tie-break artifact rather than a real cross-direction
+coupling, but it wasn't run down further and is noted rather than asserted.)
+
+This is worth relaying to Gaume — not as an answer to the antiplane-vs-bending
+question, which this cannot resolve, but as implementation-level feedback on
+how the real formula, once derived, would need to be wired in (beyond just
+the continuity gate) to actually be visible in a propagation model like this
+one's output.
 
 ### Mode III crack-speed cap — implemented, default OFF since 2026-10-10
 
