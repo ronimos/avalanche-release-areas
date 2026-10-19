@@ -162,8 +162,10 @@ LAMBDA_DROP_FACTOR    = 0.20   # fractional softening arrest threshold
 LAMBDA_RISE_FACTOR    = 0.30   # fractional stiffening arrest threshold
 
 # Λ continuity thresholds, cross-slope (mode III / flanks). Separate knobs so
-# the flanks can be tuned independently once Λ_III is known; identical to the
-# along-slope values for now, so splitting the code changed no results.
+# the flanks can be tuned independently once Λ_III carries spatial structure
+# (its formula is confirmed, but is a constant multiple of Λ_II under this
+# pipeline's single global NU); identical to the along-slope values for now,
+# so splitting the code changed no results.
 LAMBDA_CROSS_DROP_FACTOR = 0.20
 LAMBDA_CROSS_RISE_FACTOR = 0.30
 
@@ -183,20 +185,26 @@ THICKNESS_RISE_FACTOR = 0.30   # fractional thickening arrest threshold
 
 # ---- Mode III (cross-slope) elastic length -----------------------------
 # The cross-slope elastic length is a different and SMALLER quantity than the
-# along-slope (mode II) Λ. Johan Gaume's antiplane formula is not published
-# yet, so propagation currently uses the mode II Λ in every direction and the
-# cross-slope branch is a no-op.
+# along-slope (mode II) Λ. `arrest_indices.elastic_length_cross()` now matches
+# Johan Gaume's own antiplane-shear derivation exactly (personal
+# communication, 2026-10-18; not yet published in the literature) -- but
+# whether antiplane shear is even the right cross-slope regime, vs.
+# bending-dominated deformation, is explicitly still open on Gaume's own
+# account (see docs/release_area_methods.md §3). Propagation currently uses
+# the mode II Λ in every direction regardless, and the cross-slope branch is
+# a no-op, for the reason in the IMPORTANT note below.
 #
-# When the formula arrives:
-#   1. update `arrest_indices.elastic_length_cross()` with the real expression;
-#   2. flip USE_MODE3_LAMBDA to True.
+# Before flipping USE_MODE3_LAMBDA to True:
+#   1. confirm the regime question above has moved (antiplane vs. bending);
+#   2. make Λ_III vary spatially -- a constant ratio changes nothing
+#      regardless of which formula turns out right, see below.
 # Nothing else should need to change — if it does, the directional split in
 # release_geometry._qualifies() has drifted and needs fixing instead.
 #
 # The `Lambda_cross` column is already written to the meloche CSV from the
-# current (unpublished) derivation, so the data side is ready; this flag only
-# controls whether the BFS reads it. Note the shipped Jan 18 CSV predates the
-# column — regenerate it before the flag can do anything.
+# confirmed derivation, so the data side is ready; this flag only controls
+# whether the BFS reads it. Note the shipped Jan 18 CSV predates the column —
+# regenerate it before the flag can do anything.
 #
 # IMPORTANT, measured: flipping this flag has NO effect if Λ_III is a constant
 # multiple of Λ_II. The continuity test compares the *relative* change

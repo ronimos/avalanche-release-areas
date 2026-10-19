@@ -43,7 +43,11 @@ def elastic_length(E, h, D_wl, G_wl, nu=0.3):
 
 def elastic_length_cross(E, h, D_wl, G_wl, nu=0.3):
     """Cross-slope (mode III) Lambda using slab shear modulus G instead of E'.
-    Hypothesis: Lambda_III / Lambda_II = sqrt((1 - nu) / 2)."""
+    Lambda_III / Lambda_II = sqrt((1 - nu) / 2). Confirmed against Johan
+    Gaume's own antiplane-shear derivation (personal communication,
+    2026-10-18; not yet published) -- see docs/release_area_methods.md §3.
+    Whether antiplane shear (vs. bending) is the right cross-slope regime is
+    still open; this formula is correct *for* the antiplane case."""
     return np.sqrt(shear_modulus(E, nu) * h * D_wl / G_wl)
 
 

@@ -99,10 +99,15 @@ def directional_lambda(props: dict, is_cross: bool) -> float:
 
     Along-slope (mode II) always uses `Lambda`. Cross-slope (mode III) uses
     `Lambda_cross` only when `config.USE_MODE3_LAMBDA` is set; otherwise it
-    falls back to the mode II value, which is the current default because
-    Gaume's antiplane formula is not published yet.
+    falls back to the mode II value. `elastic_length_cross()` now matches
+    Gaume's own antiplane-shear derivation exactly (personal communication,
+    2026-10-18; not yet published), but the flag stays off because a single
+    global `config.NU` makes Λ_III/Λ_II a constant, which the continuity gate
+    is provably invariant to — see docs/release_area_methods.md §3.
 
-    This is the ONLY place the two directions diverge. When Λ_III lands,
+    This is the ONLY place the two directions diverge. If Λ ever carries
+    spatially-varying material properties (a per-cluster ν, or a
+    bending-stiffness-based Λ_III per Gaume's still-open regime question),
     update `arrest_indices.elastic_length_cross()` and set USE_MODE3_LAMBDA —
     no other change should be needed.
     """
@@ -328,7 +333,10 @@ def estimate_cross_slope_width(
 
     This sets the lateral *distance cap*; the cross-slope Λ continuity test
     lives in propagate_crack via directional_lambda(). Both are mode III
-    concerns and should be revisited together when Λ_III lands.
+    concerns and should be revisited together once Λ_III carries spatial
+    structure (its formula is confirmed — see docs/release_area_methods.md
+    §3 — but is a constant multiple of Λ_II under this pipeline's single
+    global NU, so it is currently a no-op).
 
     Both halves of the width ratio are measured here, by `_sector_theta`, from
     the same τp field in the same separation band: θ_along about the fall line,
@@ -799,7 +807,8 @@ def propagate_crack(
         # Λ continuity, evaluated with the elastic length and thresholds for
         # this propagation direction. Cross-slope currently resolves to the
         # same Λ and the same thresholds as along-slope, so the split is a
-        # no-op until Λ_III lands — see config.USE_MODE3_LAMBDA.
+        # no-op until Λ_III carries spatial structure — see
+        # config.USE_MODE3_LAMBDA and docs/release_area_methods.md §3.
         lam_current = directional_lambda(current_props, is_cross)
         lam_nbr     = directional_lambda(nbr_props,     is_cross)
         lam_drop, lam_rise = (

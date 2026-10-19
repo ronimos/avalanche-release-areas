@@ -183,32 +183,67 @@ Both give A_ca ∝ 1/θ, so they can only be separated through other parameters:
 
 The σt dependence is the cleanest discriminating test.
 
-### Cross-slope (mode III), hypothesis only
+### Cross-slope (mode III), formula now confirmed by Gaume; regime still open
 
 The code provides:
 
-- `elastic_length_cross`: Λ_III = √( G h D_wl / G_wl ), giving Λ_III/Λ_II = √((1−ν)/2) ≈ 0.59 at ν = 0.3. This is my derivation, using the slab shear modulus for antiplane loading.
-- `slab_energy_cap_cross`: G_slab,III = τ_flank² h / (2G), where τ_flank is a slab flank (shear) strength. No parameterization exists, so it is a user input.
+- `elastic_length_cross`: Λ_III = √( G h D_wl / G_wl ), giving Λ_III/Λ_II = √((1−ν)/2) ≈ 0.59 at ν = 0.3, using the slab shear modulus for antiplane loading. Originally written as an in-house derivation, flagged unconfirmed.
+- `slab_energy_cap_cross`: G_slab,III = τ_flank² h / (2G), where τ_flank is a slab flank (shear) strength. No parameterization exists, so it is a user input. Not addressed by the exchange below.
 
-**Pipeline status.** The propagation code splits arrest evaluation into
-along-slope and cross-slope branches (`release_geometry.directional_lambda`),
-but the cross-slope branch currently resolves to the mode II Λ, gated behind
-`config.USE_MODE3_LAMBDA = False`, pending Gaume's antiplane formula. The split
-was verified to be a bit-for-bit no-op on the Jan 18 results.
+**Confirmed by Johan Gaume (personal communication, 2026-10-18).** Asked
+directly for the antiplane-shear characteristic length, Gaume gave
 
-**A constant Λ_III/Λ_II ratio cannot change the BFS result.** This is worth
-knowing before the formula arrives. The Λ continuity gate tests the *relative*
-change (Λ_nbr − Λ_cur)/Λ_cur, which is invariant under any uniform rescaling of
-Λ; and the only absolute Λ threshold, `MIN_PROPAGATION_LAMBDA` = 0.1 m, is never
-approached (min Λ_II = 0.54 m on Jan 18, so min Λ_III = 0.32 m). Since the
-current derivation gives Λ_III/Λ_II = √((1−ν)/2), a constant for constant ν,
-switching to it provably changes nothing. Confirmed by running both flag
-states: identical areas and IoU.
+    Λ₃ = √(G_slab H_slab h_WL / G_WL)
+
+against the in-plane (mode II) length Λ₂ = √(E'_slab H_slab h_WL / G_WL),
+E' = E/(1−ν²) — i.e. Λ₂/Λ₃ = √(2/(1−ν)) (≈1.49 at ν=0.1, his example). This
+is **exactly** `elastic_length` / `elastic_length_cross` as coded: same
+symbols, same formula. The ratio checks out independently too — Λ_III/Λ_II =
+√(G/E') = √((1−ν)/2) is Gaume's Λ₂/Λ₃ reciprocated (0.59 at ν=0.3 above
+inverts to 1.69, and his ν=0.1 example of 1.49 inverts to 0.67 = √(0.9/2),
+both exact). The "unconfirmed" hedge can be dropped: the formula is right,
+per the person who derived it.
+
+**What is *not* confirmed — paraphrased from that same exchange.** Whether the transition to supershear
+propagation (mode II, along-slope) implies a parallel transition to antiplane
+shear cross-slope, or whether **bending** remains the dominant cross-slope
+deformation mechanism instead, is still open. If bending dominates, the
+relevant length scale is set by the slab's bending stiffness instead, and
+would generally be *shorter* than Λ₃ above. Either way, Gaume expects the
+cross-slope length to be smaller than the along-slope one — consistent with
+Λ_III < Λ_II here for any ν < 1 — but the correct formulation and its range of
+validity are explicitly unresolved. Gaume and Meloche plan to study exactly
+this (the bending-vs-shear transition, and the general directional
+formulation) in a new SNSF-funded project. **So: the formula is confirmed;
+whether antiplane shear is the right regime to apply it in is not.**
+
+**Pipeline status — still off, for a different reason now.** The propagation
+code splits arrest evaluation into along-slope and cross-slope branches
+(`release_geometry.directional_lambda`), but the cross-slope branch still
+resolves to the mode II Λ, gated behind `config.USE_MODE3_LAMBDA = False`.
+Before 2026-10-18 that was because the antiplane formula was unconfirmed; now
+it is confirmed, and the reason to leave the flag off is the point below —
+flipping it would not change anything in *this* pipeline regardless, because
+`config.NU` is a single global constant, not a per-cluster field.
+
+**A constant Λ_III/Λ_II ratio cannot change the BFS result.** This was true
+before the formula arrived and remains true now that it has been confirmed.
+The Λ continuity gate tests the *relative* change (Λ_nbr − Λ_cur)/Λ_cur, which
+is invariant under any uniform rescaling of Λ; and the only absolute Λ
+threshold, `MIN_PROPAGATION_LAMBDA` = 0.1 m, is never approached (min Λ_II =
+0.54 m on Jan 18, so min Λ_III = 0.32 m). Since Λ_III/Λ_II = √((1−ν)/2) is a
+constant for the single global ν this pipeline uses, switching the flag on
+provably changes nothing — confirmed by running both flag states: identical
+areas and IoU. Flipping `USE_MODE3_LAMBDA` to True today would therefore
+still be a no-op here, confirmed formula or not, and is not recommended on
+that basis alone.
 
 A real Λ_III will only move the flanks if it carries different *spatial
 structure* — i.e. if it depends on material properties that vary across
-clusters differently from E′. Injecting a spatially varying Λ_cross does change
-every release area, which confirms the plumbing is live rather than dead.
+clusters differently from E′ (a per-cluster ν, or the bending-stiffness
+alternative Gaume flags above, would both qualify). Injecting a spatially
+varying Λ_cross does change every release area, which confirms the plumbing
+is live rather than dead.
 
 ### Mode III crack-speed cap — implemented, default OFF since 2026-10-10
 
@@ -1197,8 +1232,14 @@ sections above; these are what remain open.
 2. **`tau_flank`** for the permissive half of the mode III energy cap is still
    blocked on the Cam-Clay β ambiguity, so only the restrictive half of a
    two-sided effect is implemented (§3).
-3. **Λ_III** awaits Gaume's antiplane formula; a constant Λ_III/Λ_II ratio
-   changes nothing, because the continuity gate is scale-invariant (§3).
+3. **Λ_III's antiplane formula is now confirmed** (Gaume, personal
+   communication, 2026-10-18) — `elastic_length_cross` as coded matches it
+   exactly. What remains open is whether antiplane shear is even the right
+   cross-slope regime, or whether bending dominates instead (Gaume's own
+   caveat, to be studied in a new SNSF project with Meloche), and whether any
+   material property behind Λ_III varies spatially — under the current single
+   global `NU`, the confirmed ratio still changes nothing, because the
+   continuity gate is scale-invariant (§3).
 4. **`borstad2013`** stays gated behind `NotImplementedError` — bronze OA at
    Wiley, no repository copy, so the regression has never been sourced.
 5. **Trigger-set stability.** The top-5 ranking is not stable against θ
