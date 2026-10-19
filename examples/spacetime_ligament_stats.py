@@ -12,9 +12,10 @@ import pandas as pd
 import xarray as xr
 
 OUT_DIR = Path(os.environ.get('LIG_OUT_DIR', '/tmp/lig_bench/out'))
+_AVACHAIN_HOME = os.environ.get('AVACHAIN_HOME', os.path.expanduser('~/avachain'))
 ZARR = os.environ.get(
     'LIG_ZARR',
-    '/home/ron/avachain/snowpack/little_prof/output/slope_snowpack.zarr')
+    f'{_AVACHAIN_HOME}/snowpack/little_prof/output/slope_snowpack.zarr')
 
 # Derived from config, never hardcoded: config.py is the single source of truth
 # and a stale copy here would report on columns that no longer exist.

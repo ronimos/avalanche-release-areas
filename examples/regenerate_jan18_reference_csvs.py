@@ -15,9 +15,14 @@ baseline (now *_v1.csv) so the only difference is how parameters are generated.
 Needs xarray/zarr, which are not in this repo's venv. Run with avachain's
 interpreter, which also resolves `release_areas` to this working tree:
 
-    /home/ron/avachain/.venv/bin/python -I \
+    "${AVACHAIN_HOME:-$HOME/avachain}/.venv/bin/python" -I \
         examples/regenerate_jan18_reference_csvs.py
+
+Set LIG_ZARR to point at a different zarr file (default:
+$AVACHAIN_HOME/snowpack/little_prof/output/slope_snowpack.zarr, matching
+spacetime_ligament_pass.py / spacetime_ligament_stats.py).
 """
+import os
 import warnings
 from pathlib import Path
 
@@ -33,7 +38,9 @@ from release_areas.snowpack_features import (profile_features,
 
 REPO = Path(__file__).resolve().parents[1]
 FEAT = REPO / 'data/little_prof/features'
-ZARR = '/home/ron/avachain/snowpack/little_prof/output/slope_snowpack.zarr'
+_AVACHAIN_HOME = os.environ.get('AVACHAIN_HOME', os.path.expanduser('~/avachain'))
+ZARR = os.environ.get(
+    'LIG_ZARR', f'{_AVACHAIN_HOME}/snowpack/little_prof/output/slope_snowpack.zarr')
 NLOC = 6565                      # location axis is this block repeated 9x
 SNAP = pd.Timestamp('2026-01-18 12:00')
 MIN_DEPTH_CM = 30.0

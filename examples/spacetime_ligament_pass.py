@@ -18,9 +18,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+_AVACHAIN_HOME = os.environ.get('AVACHAIN_HOME', os.path.expanduser('~/avachain'))
 ZARR = os.environ.get(
     'LIG_ZARR',
-    '/home/ron/avachain/snowpack/little_prof/output/slope_snowpack.zarr')
+    f'{_AVACHAIN_HOME}/snowpack/little_prof/output/slope_snowpack.zarr')
 NLOC = 6565
 MIN_DEPTH_CM = 30.0
 BLOCK = 50
