@@ -8,6 +8,13 @@ Units: SI (Pa, m, kg/m3, J/m2); angles in degrees.
 """
 import numpy as np
 
+from release_areas.config import (
+    MODE2_SPEED_RATIO,
+    MODE3_SPEED_RATIO,
+    FACET_STRENGTH_FACTOR,
+    DMAX_FACTOR,
+)
+
 G_ACC = 9.81
 
 
@@ -65,14 +72,14 @@ def tension_gradient(rho, psi_deg, phi_deg=27.0):
     return np.maximum(k, 0.0)
 
 
-def dynamic_factor(E, rho, nu=0.3, speed_ratio=1.6):
+def dynamic_factor(E, rho, nu=0.3, speed_ratio=MODE2_SPEED_RATIO):
     """k_x / k_f = c_p^2 / (c_p^2 + adot^2), adot = speed_ratio * c_s."""
     c_s, c_p = wave_speeds(E, rho, nu)
     adot = speed_ratio * c_s
     return c_p**2 / (c_p**2 + adot**2)
 
 
-def dynamic_gradient(k_f, E, rho, nu=0.3, speed_ratio=1.6):
+def dynamic_gradient(k_f, E, rho, nu=0.3, speed_ratio=MODE2_SPEED_RATIO):
     """k_x = k_f c_p^2 / (c_p^2 + adot^2)."""
     return k_f * dynamic_factor(E, rho, nu, speed_ratio)
 
@@ -89,8 +96,9 @@ def dynamic_gradient(k_f, E, rho, nu=0.3, speed_ratio=1.6):
 # We keep the literal 1.6 so published figures reproduce; cp_over_cs() below
 # gives the exact alternative. The choice moves mode3_length_ratio by ~5%
 # (0.712 -> 0.675).
-MODE2_SPEED_RATIO = 1.6   # adot / c_s upslope, Meloche et al. (2025) as written
-MODE3_SPEED_RATIO = 1.0   # adot / c_s cross-slope cap, Broberg (1989)
+#
+# MODE2_SPEED_RATIO / MODE3_SPEED_RATIO are imported from config.py (single
+# source of truth) rather than redefined here.
 
 
 def cp_over_cs(nu=0.3):
@@ -218,7 +226,7 @@ def slab_tensile_strength(rho, scale=ST_RHO_SCALE, exp=ST_RHO_EXP, rho_ref=RHO_R
 # a: faceted snow is about half as strong in tension as rounded snow at equal
 # density (Jamieson & Johnston 1990). Applied continuously through f so that
 # neighbouring grid cells cannot step across a grain-type boundary.
-FACET_STRENGTH_FACTOR = 0.5
+# FACET_STRENGTH_FACTOR is imported from config.py (single source of truth).
 
 
 def facetedness(sphericity, dendricity, sp_ref=None):
@@ -305,7 +313,7 @@ def tensile_strength_weakest_link(sigma_t_i, E_i, dz_i):
 # The on/off switch is config.USE_LIGAMENT_BOUND -- do not shadow it here.
 
 RHO_ICE = 917.0
-DMAX_FACTOR = 1.0   # d_max = DMAX_FACTOR * grain size (both in m)
+# DMAX_FACTOR is imported from config.py (single source of truth).
 
 # Schweizer, Michot & Kirchner (2004) Ann. Glaciol. 38, Eq. 8. A4 is the
 # paper's 0.35 kPa m.

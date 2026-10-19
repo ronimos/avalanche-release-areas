@@ -22,8 +22,11 @@ RASTER_EPSG = 6342
 # -----------------------------------------------------------------------
 # Snowpack / weak-layer material
 # -----------------------------------------------------------------------
-G_WL     = 0.2e6   # weak-layer shear modulus (Pa); measured by Reiweger et al.
-                   # (2010) in cold-lab shear tests, per Meloche et al. (2025) p.7
+G_WL     = 0.2e6   # weak-layer shear modulus (Pa). Meloche et al. (2025) Table 1
+                   # / p.7 attribute this to cold-lab shear tests by Reiweger et
+                   # al. (2010); that attribution is not independently verified
+                   # here (not in the arXiv:2406.01360v1 preprint's bibliography;
+                   # the final JGR text was not checked) -- see methods §4, §6, §9.
 NU       = 0.3     # slab Poisson's ratio
 PHI_DEG  = 27.0    # snow friction angle (degrees)
 DELTA    = 1.0     # Meloche softening coefficient δ. Matches the paper's own
@@ -150,7 +153,6 @@ ELEVATION_PCTILE   = 50     # keep clusters at or above this elevation percentil
 # -----------------------------------------------------------------------
 STAUCHWALL_DEG        = 28.0   # slope threshold for downslope arrest
 GAUME_ASPECT_CAP      = 2.5    # max cross-slope width / A_ca
-MODE3_SCALE           = 1.5    # mode III lateral arrest multiplier
 MIN_POLYGON_AREA      = 200.0  # m²; discard smaller polygons
 TAU_G_ABS_FLOOR       = 350.0  # Pa; absolute driving-stress floor
 MIN_PROPAGATION_SLAB  = 0.50   # m; thin-slab arrest threshold

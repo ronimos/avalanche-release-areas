@@ -66,7 +66,7 @@ class TestHomogeneousSlab:
 
     def test_f_zero_everywhere_reproduces_current_sigma_t(self):
         # Note: synthetic only. Real profiles have RG sphericity ~0.86, so
-        # f is never 0 there; see CLAUDE.md.
+        # f is never 0 there; see docs/release_area_methods.md §4(c).
         agg = ai.aggregate_slab(self.rho, self.dz, self.sp, self.dd)
         assert agg['f_mean_weighted'] == pytest.approx(0.0)
         assert agg['sigma_t_mean'] == pytest.approx(ai.slab_tensile_strength(RHO))

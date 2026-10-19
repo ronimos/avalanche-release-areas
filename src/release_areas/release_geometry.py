@@ -28,7 +28,9 @@ Flanks:    Gaume et al. (2015) The Cryosphere, doi:10.5194/tc-9-795-2015
 
 Mode III (cross-slope) arrest is NOT applied here. arrest_indices provides
 elastic_length_cross and slab_energy_cap_cross, but no mode III multiplier is
-used pending Johan Gaume's antiplane formula — see CLAUDE.md "Mode III TODO".
+used pending Johan Gaume's antiplane formula — see
+docs/release_area_methods.md §3 "Cross-slope (mode III), hypothesis only"
+and §8 item 3.
 """
 
 from __future__ import annotations
