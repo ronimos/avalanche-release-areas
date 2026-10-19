@@ -933,28 +933,46 @@ What actually stops propagation, in evaluation order:
 | Λ discontinuity, drop / rise | `LAMBDA_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
 | Thickness discontinuity, drop / rise | `THICKNESS_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
 
-**Measured: which gates actually fire.** Arrest reasons summed over the five
-Jan 18 triggers (1 109 rejections, `--max-clusters 2000`):
+**Measured: which gates actually fire.** Regenerated 2026-10-18 under current
+defaults (`MAX_BFS_CLUSTERS=2000`, `USE_MODE3_SPEED_CAP=False`) by
+instrumenting `propagate_crack`'s `wave_callback` directly — the earlier table
+here predated the 2026-10-10 default changes and is replaced, not just
+re-labeled, because the shares move enough to matter. Arrest reasons summed
+over the five Jan 18 triggers (1 140 rejections, `--n-triggers 5`,
+`--max-clusters 2000`):
 
 | Gate | Share |
 |---|---|
-| `outside_start_zone` | 29.4% |
-| `lateral_distance_cap` | 24.1% |
-| Λ discontinuity (along + cross, drop + rise) | 24.9% |
-| downslope / upslope distance cap | 9.4% |
-| thickness discontinuity | 6.7% |
-| `stauchwall_slope` | 5.5% |
+| `outside_start_zone` | 34.0% |
+| `lateral_distance_cap` | 17.4% |
+| Λ discontinuity (along + cross, drop + rise) | 17.5% |
+| downslope / upslope distance cap | 13.2% |
+| thickness discontinuity | 15.2% |
+| `stauchwall_slope` | 1.8% |
 | **`tau_g_below_floor`** | **0%** |
-| **`thin_slab`** | **0%** |
+| `thin_slab` | 0.9% |
 | **`low_lambda`** | **0%** |
 
-So all three *absolute* physical floors are inert on this dataset.
-`TAU_G_ABS_FLOOR` = 350 Pa sits at **P0.0** of the start-zone τg distribution
-(minimum 553 Pa, median 1 930 Pa), so it cannot fire; likewise
-`MIN_PROPAGATION_SLAB` = 0.5 m, which the trigger filter chain already
-enforces, and `MIN_PROPAGATION_LAMBDA` = 0.1 m against a minimum Λ of 0.54 m.
-An earlier revision of this section claimed the 350 Pa floor was the binding
-driving-stress criterion; that was wrong.
+Two of the three *absolute* physical floors are inert on this dataset, not
+all three as an earlier revision claimed. `TAU_G_ABS_FLOOR` = 350 Pa still
+sits at **P0.0** of the start-zone τg distribution (minimum 553 Pa, median
+1 930 Pa), so it cannot fire; `MIN_PROPAGATION_LAMBDA` = 0.1 m is still far
+below the minimum Λ of 0.54 m. But `MIN_PROPAGATION_SLAB` = 0.5 m now fires
+10 times (0.9%) — the earlier claim that "the trigger filter chain already
+enforces" this was only true *at the trigger cluster itself*; the 0.5–2.0 m
+slab-thickness filter (§5, stage 2) screens candidate triggers, not every
+cluster the flood-fill subsequently reaches, so an interior cluster thinner
+than 0.5 m can still be visited and arrested there. A second earlier revision
+claimed the 350 Pa floor was the binding driving-stress criterion; that was
+also wrong, and remains wrong under the current defaults.
+
+Under current defaults the ordering has changed too: thickness discontinuity
+(15.2%) and the distance caps (13.2% combined up/down) are each now
+comparable to Λ discontinuity (17.5%), whereas before the mode III speed-cap
+default change, Λ discontinuity alone matched the lateral cap. The direct
+θ-driven gates — `lateral_distance_cap` plus `upslope_distance_cap`, since
+both derive from A_ca — account for 17.4% + 4.3% = **21.7%** of rejections,
+noticeably less than the hard `outside_start_zone` mask alone (34.0%).
 
 What actually bounds the region is the start-zone mask, the three distance
 caps, and the Λ/thickness discontinuity heuristics. The latter are heuristics
@@ -969,12 +987,14 @@ to be kept it should be expressed relative to the local τg distribution rather
 than in Pa — but see §6 on why the percentile must not be chosen from this
 event.
 
-**Safety cap.** `config.MAX_BFS_CLUSTERS` (default 2000) bounds the region size.
-This is not physics. When the cap binds, the run prints a `[CAP-BOUND]`
-warning and the polygon is an artefact of the cap. On Jan 18, 3 of 5 triggers
-are cap-bound at the default; the region sizes saturate by about 1 000
-clusters, so any `--max-clusters` ≥ 1000 gives the same answer — raising it is
-not tuning to the event.
+**Safety cap.** `config.MAX_BFS_CLUSTERS` (default 2000, raised from 500 on
+2026-10-18 for exactly this reason) bounds the region size. This is not
+physics. When the cap binds, the run prints a `[CAP-BOUND]` warning and the
+polygon is an artefact of the cap. At the *old* 500 default, 3 of 5 Jan 18
+triggers were cap-bound; region sizes saturate by about 1 000 clusters, so at
+the current 2000 default nothing on Jan 18 is cap-bound, and any
+`--max-clusters` ≥ 1000 gives the same answer — raising it further is not
+tuning to the event.
 
 **Mode III.** No cross-slope (mode III) arrest multiplier is applied. Lateral
 extent comes only from `estimate_cross_slope_width`, which scales A_ca by
@@ -1212,7 +1232,7 @@ mutually-cancelling.
 
 **What actually justifies the choice.** Not the IoU margin, which is thin:
 0.606 vs 0.598 trigger-matched, 0.677 vs 0.669 best — roughly 1% on n = 1,
-with a metric capped at 0.830 and 29.4% of arrests set by the start-zone mask.
+with a metric capped at 0.830 and 34.0% of arrests set by the start-zone mask.
 IoU on this event can rule configurations *out* (it does so decisively for both
 half-corrected ones) but cannot separate the two defensible ones. The decision
 rests on each component being independently sourced — van Herwijnen et al.
