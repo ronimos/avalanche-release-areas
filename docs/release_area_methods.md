@@ -907,11 +907,24 @@ Candidate trigger locations are selected by a four-stage filter applied to all s
 | Stage | Criterion | Rationale |
 |---|---|---|
 | 1 | τg ≥ 40 Pa; slope ≥ (stauchwall_deg + 2°); Sk38 < 1.0 | Minimum gravitational driving stress, terrain steep enough to sustain crack propagation, and unstable stability index |
-| 2 | 0.5 m ≤ h ≤ max_slab_thickness (default 2.0 m; 1.5 m for skier scenarios), **or h is NaN** | Exclude implausibly thin or anomalously thick slab columns. Clusters with no measured slab thickness are *kept*, not rejected |
+| 2 | 0.5 m ≤ h ≤ max_slab_thickness (default 2.0 m, sized for explosive control; 1.5 m for skier scenarios), **or h is NaN** | Exclude implausibly thin slabs and slabs too deep for the control method to trigger. Clusters with no measured slab thickness are *kept*, not rejected |
 | 3 | Elevation ≥ P50 of remaining candidates | Prefer upper start-zone cells — lower cells may be in runout or deposition |
 | 4 | Π₁ ≥ median of candidates (propagation gate) | Π₁ = τg / (θ Λ √(1+δ)); retain clusters where the dimensionless driving ratio exceeds the group median, i.e., where propagation is relatively more likely |
 
-Survivors are ranked by Sk38 ascending (most unstable first). The top N (default 5, `config.N_TOP_TRIGGERS`) are passed to the BFS release-polygon builder. Each trigger yields one release polygon per `--size-factors` entry (default a single polygon at size_factor 1.0).
+Survivors are ranked by Sk38 ascending (most unstable first). The top N (`config.N_TOP_TRIGGERS`, 3 since 2026-10-09) are passed to the BFS release-polygon builder. Each trigger yields one release polygon per `--size-factors` entry (default a single polygon at size_factor 1.0).
+
+**Tie-break (since 2026-10-20, `rank_triggers`).** SNOWPACK reports Sk38 to two decimals, so the top-N cut regularly falls inside a tie (item 5 in §8). Ties used to go by CSV row order. They are now broken by `rc_wl`, the critical cut length (SNOWPACK code 0606, Richter et al. 2019) averaged over the same WL elements; lower r_c means more propagation-prone. Sk38 still decides every place it separates. Clusters with no r_c sort after those with one, and full ties keep row order. This required reading r_c from xsnow's `rc_flat` (86043d0); before that, `rc_wl` was NaN for every cluster.
+
+**The slab-thickness cap decides which clusters trigger.** Within the eligible pool, Sk38 at the WL falls almost monotonically with slab thickness (Spearman −0.93 in the avachain 2026-01-18 pool). The ranking therefore picks the thickest slabs under `max_slab_thickness`. Measured in avachain on 2026-10-20:
+- 2.0 → 2.5 m replaced all five triggers on both 2026-01-18 and 2026-03-07.
+- 1.5 m left only two candidates on 2026-03-07.
+
+So `max_slab_thickness` is an operational choice (what the control method can reach), not something to tune against an observed event. Alternatives tried and not adopted:
+- SSI, which is Sk38 + 2 here.
+- r_c as the primary key, which also tracks thickness (−0.70).
+- Sk38 residuals after detrending on thickness.
+
+A metric that is not depth-driven is the open item. The next candidate is skier stability evaluated at each cluster's own slope angle.
 
 ### What the BFS actually arrests on (`propagate_crack`)
 
@@ -1319,8 +1332,10 @@ sections above; these are what remain open.
    significant figures decide places 3-5. The sharpest case was the 2026-10-08
    v2 run, where an Sk38 tie at 0.75 put cluster 3020 in fifth place and that
    scenario collapsed to 434 m² at IoU 0.061, dragging the all-five mean on its
-   own. Any comparison should be read trigger-matched, and a tie-break less
-   brittle than raw Sk38 ordering would be worth having.
+   own. Any comparison should be read trigger-matched. **Partly addressed
+   2026-10-20:** exact Sk38 ties are now broken by the critical cut length r_c
+   rather than CSV row order (`rank_triggers`, §5). The ranking itself is still
+   decided by the slab-thickness cap, because Sk38 tracks slab depth; see §5.
 6. **avachain's `docs/TODO.md` has no entry for any of this work** — not the
    element weighting, the selectable relations, the ligament bound, the
    space-time run, the two direction fixes, nor the θ estimator. By convention

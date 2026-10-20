@@ -61,6 +61,27 @@ from release_areas.scenario_writer import write_scenario
 from release_areas.snowpack_features import geojson_to_mask
 
 
+def rank_triggers(cand_df: pd.DataFrame, n: int, sk38_col: str,
+                  rc_col: str = 'rc_wl') -> pd.DataFrame:
+    """Top-n trigger candidates: lowest Sk38 first, ties broken by lowest r_c.
+
+    SNOWPACK reports Sk38 to two decimals, so the top-N cut regularly falls
+    inside a tie (§8 item 5: the 0.72 three-way tie, and the 0.75 tie that put
+    cluster 3020 fifth). nsmallest() settled those by CSV row order, i.e. by
+    nothing physical. The critical cut length r_c at the same weak layer
+    breaks them by propagation propensity instead (lower = more
+    propagation-prone). Only exact Sk38 ties are affected; Sk38 still decides
+    every place it separates. Clusters with no r_c sort after those with one;
+    anything still tied keeps row order (the multi-column sort is stable).
+
+    rc_col is optional so older feature CSVs without it still rank by Sk38.
+    Mirrors avachain analysis_pipeline._rank_triggers.
+    """
+    ranked = cand_df.dropna(subset=[sk38_col])
+    keys = [sk38_col] + ([rc_col] if rc_col in ranked.columns else [])
+    return ranked.sort_values(keys, na_position='last').head(n)
+
+
 def load_kml_mask(kml_path: Path, dem_shape, transform,
                   dst_epsg: int = config.RASTER_EPSG) -> np.ndarray:
     """Parse a KML polygon using stdlib XML (no fastkml dependency)."""
@@ -259,11 +280,10 @@ def main():
             print(f"  Pi1 propagation gate (>= median {pi1_median:.2f}): "
                   f"{pre_gate} → {cand_df.shape[0]} candidates")
 
-    triggers_df = (cand_df.dropna(subset=[sk38_col])
-                          .nsmallest(args.n_triggers, sk38_col))
+    triggers_df = rank_triggers(cand_df, args.n_triggers, sk38_col)
     trigger_ids = list(triggers_df.index)
     sk38_vals   = list(triggers_df[sk38_col].round(3))
-    print(f"Top-{args.n_triggers} triggers (lowest Sk38): {trigger_ids}  Sk38={sk38_vals}")
+    print(f"Top-{args.n_triggers} triggers (lowest Sk38, ties by r_c): {trigger_ids}  Sk38={sk38_vals}")
 
     # --- Build release-depth raster from per-cluster slab thickness ---
     # slab_thickness is the failure plane -> surface depth, i.e. the slab that

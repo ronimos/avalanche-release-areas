@@ -144,7 +144,14 @@ LIGAMENT_VARIANTS = (
 MIN_TAU_G          = 40.0   # Pa; minimum gravitational driving shear stress
 MAX_SK38           = 1.0    # Sk38 must be below this to count as unstable
 MIN_SLAB_THICKNESS = 0.5    # m
-MAX_SLAB_THICKNESS = 2.0    # m; use 1.5 for skier-triggered scenarios
+# m; the deepest slab explosive control is expected to trigger at the basal
+# WL. This is an operational choice, not a physical result, and it binds hard.
+# Sk38 at the WL falls almost monotonically with slab thickness (Spearman
+# -0.93 in the avachain 2026-01-18 pool), so the Sk38 ranking picks the
+# thickest slabs under this cap. In avachain, 2.0 -> 2.5 m replaced all five
+# triggers on both 2026-01-18 and 2026-03-07, and 1.5 m left only two
+# candidates on 2026-03-07. Use 1.5 for skier-triggered scenarios.
+MAX_SLAB_THICKNESS = 2.0
 SLOPE_MARGIN_DEG   = 2.0    # degrees added to stauchwall angle for the trigger gate
 ELEVATION_PCTILE   = 50     # keep clusters at or above this elevation percentile
 
