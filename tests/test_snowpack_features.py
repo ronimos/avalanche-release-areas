@@ -103,3 +103,53 @@ class TestWeakLayerThickness:
         dz = element_thickness(Z, HS, np.ones(4, bool))
         assert span == pytest.approx(float(np.nansum(dz[wl_m])) - DZ_TRUE[0])
         assert span < float(np.nansum(dz[wl_m]))
+
+
+# --- critical cut length r_c at the weak layer -------------------------------
+# rc_wl was NaN everywhere until 2026-10-20: RC_VAR named 'critical_cut_length',
+# which xsnow keeps only as an alias of the stored variable 'rc_flat', and a
+# bare except swallowed the KeyError. SNOWPACK leaves the basal element at -999
+# and writes r_c <= 0 where tau_p < tau_g (StabilityAlgorithms::
+# CriticalCutLength) — the most unstable case, so it counts as 0 m.
+# Mirrors avachain tests/test_snowpack_analysis.py.
+from types import SimpleNamespace
+from release_areas.snowpack_features import profile_features
+
+_RC_Z = [-1.2, -1.1, -1.0, -0.9, -0.8, -0.7, -0.6,
+         -0.5, -0.4, -0.3, -0.2, -0.1]
+_WL3_SLAB = [520] * 3 + [320] * 9
+
+
+def _rc_profile(rc_wl_elements=None):
+    # profile_features only needs name -> object-with-.values; this repo has
+    # no xarray dependency, so a dict stands in for the Dataset.
+    ds = {'z':          SimpleNamespace(values=np.array(_RC_Z, float)),
+          'grain_type': SimpleNamespace(values=np.array(_WL3_SLAB, float)),
+          'HS':         SimpleNamespace(values=np.array(1.2))}
+    if rc_wl_elements is not None:
+        rc = np.full(len(_RC_Z), 0.9)
+        rc[:3] = rc_wl_elements
+        ds['rc_flat'] = SimpleNamespace(values=rc)
+    return ds
+
+
+class TestRcWl:
+    def test_reads_the_rc_flat_variable(self):
+        assert profile_features(_rc_profile([-999., 0.4, 0.2]), 0.0)['rc_wl'] \
+            == pytest.approx(0.3)
+
+    def test_excludes_undefined_basal_element(self):
+        assert profile_features(_rc_profile([-999., 0.5, 0.5]), 0.0)['rc_wl'] \
+            == pytest.approx(0.5)
+
+    def test_non_positive_counts_as_zero(self):
+        assert profile_features(_rc_profile([-999., -0.13, 0.6]), 0.0)['rc_wl'] \
+            == pytest.approx(0.3)
+
+    def test_all_undefined_is_nan(self):
+        assert np.isnan(profile_features(_rc_profile([-999.] * 3), 0.0)['rc_wl'])
+
+    def test_missing_variable_warns(self):
+        with pytest.warns(UserWarning, match='rc_flat'):
+            feat = profile_features(_rc_profile(), 0.0)
+        assert np.isnan(feat['rc_wl'])
