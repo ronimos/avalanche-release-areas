@@ -291,10 +291,12 @@ RING_STEP_M           = None
 BFS_K_NEIGHBOURS      = 8      # cluster adjacency degree for the flood-fill
 MAX_BFS_CLUSTERS      = 2000   # safety cap on region size; see methods §5
 
-# Meloche per-direction arrest test inside the BFS. Disabled by default: the
-# flood-fill uses the Λ/thickness discontinuity heuristics plus TAU_G_ABS_FLOOR
-# instead. See methods §5 — enabling this changes every release polygon.
-USE_MELOCHE_ARREST = False
+# Meloche per-direction arrest test inside the BFS. ON since 2026-10-23 (Ron),
+# matching ~/avachain. When on, the flood-fill stops at the directional Eq. 20
+# test (arrest_indices.arrest_length, C = 0.045) and SKIPS the Λ/thickness
+# discontinuity heuristics; TAU_G_ABS_FLOOR, thin slab, low Λ and the distance
+# caps still apply. See methods §5.
+USE_MELOCHE_ARREST = True
 
 # -----------------------------------------------------------------------
 # Scenario sweep

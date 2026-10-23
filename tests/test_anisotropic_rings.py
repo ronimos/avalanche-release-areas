@@ -229,3 +229,23 @@ class TestAnisotropicGrowth:
         config.USE_ANISOTROPIC_RINGS = True
         with pytest.raises(ValueError, match='positive ring_step'):
             _run(scene)
+
+
+class TestMelocheArrestPrefactor:
+    """Eq. 20 carries C = 0.045 and comes from arrest_length (the avachain copy
+    that was inlined dropped it and could not fire). Ported from avachain."""
+
+    def test_stronger_wl_downslope_arrests_at_the_first_hop(self, scene, monkeypatch):
+        """WL strength rises 300 Pa/m down the fall line: arrest length ~2.9 m,
+        under the 4 m hop, so no cluster downslope of the trigger is reached."""
+        import release_areas.release_geometry as rg_mod
+        monkeypatch.setattr(rg_mod, 'USE_MELOCHE_ARREST', True)
+        px = scene['pixel_index']
+        snap = scene['snap_features'].copy()
+        for cid, (rows, _cols) in px.items():
+            snap.loc[cid, 'wl_shear_strength'] = 2400.0 + 300.0 * rows.mean()
+        _poly, reached = _run(dict(scene, snap_features=snap))
+        t_rows, _ = px[scene['trigger']]
+        assert [c for c in reached
+                if px[c][0].mean() > t_rows.mean() + BLOCK] == []
+        assert len(reached) > 1

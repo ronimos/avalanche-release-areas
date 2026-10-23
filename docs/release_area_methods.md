@@ -929,9 +929,11 @@ A metric that is not depth-driven is the open item. The next candidate is skier 
 ### What the BFS actually arrests on (`propagate_crack`)
 
 This is the part most likely to be misread from the module names. The
-flood-fill does **not** apply the Meloche A_ca criterion per direction. That
-test exists but is gated behind `config.USE_MELOCHE_ARREST`, which is `False`.
-What actually stops propagation, in evaluation order:
+flood-fill applies the Meloche A_ca criterion per direction when
+`config.USE_MELOCHE_ARREST` is on, which it is since 2026-10-23 (it was `False`
+before). In that mode the Λ/thickness continuity gates below are **skipped**,
+not run alongside; the rest of the gates still apply. With it off, what stops
+propagation, in evaluation order:
 
 | Gate | Constant | Value |
 |---|---|---|
