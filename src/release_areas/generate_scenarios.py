@@ -172,12 +172,15 @@ def main():
                     help='Cap lateral extent at A_ca x L_dyn,III/L_dyn,II '
                          f'(default: {config.USE_MODE3_SPEED_CAP}). Off is '
                          'bit-for-bit identical to pre-cap behaviour.')
-    ap.add_argument('--arrest-mode', choices=('legacy', 'energy'),
+    ap.add_argument('--arrest-mode',
+                    choices=('legacy', 'energy', 'slope_only', 'sk38_connected'),
                     default=config.ARREST_MODE,
                     help=f'BFS arrest rule (default: {config.ARREST_MODE}). '
                          "'energy' is the path-energy hypothesis "
                          '(energy_path.py); it writes energy_cells.csv and '
-                         'energy_rejected.csv per scenario.')
+                         "energy_rejected.csv per scenario. 'slope_only' and "
+                         "'sk38_connected' are mechanics-free baselines "
+                         '(baselines.py); they write rejected.csv.')
     ap.add_argument('--delta', type=float, default=config.DELTA,
                     help=f'Meloche softening coefficient for the BFS Eq. 20 test '
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
@@ -384,7 +387,7 @@ def main():
             scenario_n += 1
             sid = f"scenario_{scenario_n:03d}"
 
-            energy_state = {} if config.ARREST_MODE == 'energy' else None
+            energy_state = {} if config.ARREST_MODE != 'legacy' else None
             poly = make_release_polygon_2d(
                 trigger_cluster_id = trig_id,
                 A_ca               = A_ca_val,
@@ -441,7 +444,12 @@ def main():
                 row['frac_outside_mask'] = frac_outside_mask(
                     poly, start_zone_mask, transform)
             scenarios.append(row)
-            if energy_state:
+            if energy_state and 'cells' not in energy_state:
+                sdir = out_dir / 'scenarios' / sid
+                sdir.mkdir(parents=True, exist_ok=True)
+                pd.Series(energy_state['rejected'], name='reason', dtype=object) \
+                    .rename_axis('cluster_id').to_csv(sdir / 'rejected.csv')
+            elif energy_state:
                 sdir = out_dir / 'scenarios' / sid
                 sdir.mkdir(parents=True, exist_ok=True)
                 pd.DataFrame.from_dict(energy_state['cells'], orient='index') \

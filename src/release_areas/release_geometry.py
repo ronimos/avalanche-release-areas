@@ -456,7 +456,7 @@ def make_release_polygon_2d(
 
     config.MASK_MODE == 'diagnostic' ignores start_zone_mask (no BFS gate, no clip).
 
-    In config.ARREST_MODE == 'energy' there is no rectangle fallback and no
+    In any config.ARREST_MODE but 'legacy' there is no rectangle fallback and no
     MIN_POLYGON_AREA floor: a trigger-only arrest is the result, not a failure.
 
     Primary method (use_propagation=True):
@@ -520,7 +520,7 @@ def make_release_polygon_2d(
             return None
         return poly
 
-    energy_mode = config.ARREST_MODE == 'energy'
+    energy_mode = config.ARREST_MODE != 'legacy'    # energy and the baselines
 
     if use_propagation and (energy_mode or not meloche_df.empty):
         polygon, _reached = propagate_crack(
@@ -609,8 +609,8 @@ def propagate_crack(
     Identify release zone as the connected region of clusters reachable
     from the trigger where crack arrest criteria are not met.
 
-    config.ARREST_MODE == 'energy' hands off to propagate_crack_energy();
-    state_out is filled only in that mode.
+    config.ARREST_MODE == 'energy' hands off to propagate_crack_energy(), and
+    'slope_only' / 'sk38_connected' to baselines.py; state_out is not filled in legacy.
 
     Starting from the trigger cluster, expands outward to neighbouring
     clusters in order of proximity. A cluster is included if it passes
@@ -632,6 +632,14 @@ def propagate_crack(
             max_clusters=max_clusters, pixel_index=pixel_index,
             aspect_grid=aspect_grid, wave_callback=wave_callback,
             state_out=state_out)
+    if config.ARREST_MODE in ('slope_only', 'sk38_connected'):
+        from release_areas.baselines import propagate_baseline
+        return propagate_baseline(
+            config.ARREST_MODE, trigger_cluster_id, cluster_map, dem, slope_grid,
+            transform, start_zone_mask=start_zone_mask,
+            stauchwall_deg=stauchwall_deg, snap_features=snap_features,
+            k_neighbours=k_neighbours, max_clusters=max_clusters,
+            pixel_index=pixel_index, state_out=state_out)
     if config.ARREST_MODE != 'legacy':
         raise ValueError(f"unknown config.ARREST_MODE {config.ARREST_MODE!r}")
 
