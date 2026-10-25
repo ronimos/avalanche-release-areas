@@ -30,6 +30,7 @@ import rasterio.transform as rt
 from release_areas import config
 from release_areas import arrest_indices as _ai
 from release_areas.arrest_indices import evaluate as _ai_evaluate
+from release_areas import energy_path as _ep
 
 # Slab/weak-layer material constants (config is the source of truth)
 G_WL = config.G_WL   # weak-layer shear modulus (Pa)
@@ -652,28 +653,30 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
         rho     = row.get('slab_density',      np.nan)
         h_m     = row.get('slab_thickness',    np.nan)
         psi_deg = slopes_cl.get(cid, np.nan)
+        # Path-energy columns need no theta, so every row carries them.
+        energy  = _ep.cell_energy(row, psi_deg)
 
         if any(np.isnan(v) for v in [tau_p, Lambda, rho, h_m, psi_deg]):
-            rows_out.append({'cluster_id': cid})
+            rows_out.append({'cluster_id': cid, **energy})
             continue
 
         psi_rad = np.radians(psi_deg)
         sin_psi = np.sin(psi_rad)
         if sin_psi < 0.01:
-            rows_out.append({'cluster_id': cid})
+            rows_out.append({'cluster_id': cid, **energy})
             continue
 
         tau_g_guard = rho * G_GRAV * h_m * sin_psi
         if tau_g_guard < config.TAU_G_FEATURE_FLOOR:
             rows_out.append({'cluster_id': cid, 'tau_g': tau_g_guard,
-                             'slope_angle': psi_deg,
+                             'slope_angle': psi_deg, **energy,
                              'note': 'tau_g below valid range for scaling law'})
             continue
 
         theta = float(theta_by_cid.get(int(cid), np.nan))
         if np.isnan(theta) or theta < config.THETA_MIN:
             rows_out.append({'cluster_id': cid, 'tau_g': tau_g_guard,
-                             'theta': theta, 'slope_angle': psi_deg})
+                             'theta': theta, 'slope_angle': psi_deg, **energy})
             continue
 
         D_wl_val   = row.get('wl_thickness', np.nan)
@@ -735,6 +738,7 @@ def compute_meloche_features(snap_data: dict, cluster_map: np.ndarray,
             'tau_p_star':   ai.get('tau_p_star',   np.nan),
             'R0':           ai.get('R0',            np.nan),
             'A_ca_energy':  ai.get('A_ca_energy',  np.nan),
+            **energy,
         })
 
     if not rows_out:

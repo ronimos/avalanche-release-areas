@@ -48,6 +48,7 @@ import pandas as pd
 import rasterio
 
 from release_areas import config
+from release_areas import release_geometry as _rg
 from release_areas.release_geometry import (
     first_scalar,
     cluster_pixel_index,
@@ -159,12 +160,27 @@ def main():
                     help='Cap lateral extent at A_ca x L_dyn,III/L_dyn,II '
                          f'(default: {config.USE_MODE3_SPEED_CAP}). Off is '
                          'bit-for-bit identical to pre-cap behaviour.')
+    ap.add_argument('--arrest-mode', choices=('legacy', 'energy'),
+                    default=config.ARREST_MODE,
+                    help=f'BFS arrest rule (default: {config.ARREST_MODE}). '
+                         "'energy' is the path-energy hypothesis "
+                         '(energy_path.py); it writes energy_cells.csv and '
+                         'energy_rejected.csv per scenario.')
+    ap.add_argument('--delta', type=float, default=config.DELTA,
+                    help=f'Meloche softening coefficient for the BFS Eq. 20 test '
+                         f'(default: {config.DELTA}; Fig. 8 runs used 0). '
+                         'A_ca_brittle and Pi1_elastic are read from the CSV '
+                         'and keep the delta they were generated with.')
     args = ap.parse_args()
 
     # propagate_crack reads these from config, so set them before any run.
     # Both are physics switches, not tuning knobs — see config.py.
     config.USE_ANISOTROPIC_RINGS = args.anisotropic_rings
     config.USE_MODE3_SPEED_CAP   = args.mode3_speed_cap
+    # release_geometry snapshots config.DELTA at import, so patch both.
+    config.DELTA = args.delta
+    _rg.MELOCHE_DELTA = args.delta
+    config.ARREST_MODE = args.arrest_mode
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)
@@ -350,6 +366,7 @@ def main():
             scenario_n += 1
             sid = f"scenario_{scenario_n:03d}"
 
+            energy_state = {} if config.ARREST_MODE == 'energy' else None
             poly = make_release_polygon_2d(
                 trigger_cluster_id = trig_id,
                 A_ca               = A_ca_val,
@@ -363,6 +380,7 @@ def main():
                 stauchwall_deg     = args.stauchwall_deg,
                 max_clusters       = args.max_clusters,
                 pixel_index        = pixel_index,
+                state_out          = energy_state,
             )
 
             iou = 0.0
@@ -402,6 +420,13 @@ def main():
                     'iou':              0.0,
                 }
             scenarios.append(row)
+            if energy_state:
+                sdir = out_dir / 'scenarios' / sid
+                sdir.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame.from_dict(energy_state['cells'], orient='index') \
+                    .rename_axis('cluster_id').to_csv(sdir / 'energy_cells.csv')
+                pd.Series(energy_state['rejected'], name='reason', dtype=object) \
+                    .rename_axis('cluster_id').to_csv(sdir / 'energy_rejected.csv')
 
             if iou > best['iou']:
                 best = {'iou': iou, 'poly': poly, 'sf': sf}

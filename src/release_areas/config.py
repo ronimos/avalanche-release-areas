@@ -299,6 +299,14 @@ MAX_BFS_CLUSTERS      = 2000   # safety cap on region size; see methods §5
 USE_MELOCHE_ARREST = True
 
 # -----------------------------------------------------------------------
+# Path-energy arrest (energy_path.py) — hypothesis, see methods §3
+# -----------------------------------------------------------------------
+ARREST_MODE         = 'legacy'        # BFS arrest rule: 'legacy' (propagate_crack as before) or 'energy' (path energy)
+SIGMA_T_COLUMN      = 'sigma_t_mean'  # thickness-weighted slab σt; 'sigma_t_wl' = weakest-link bound (methods §4)
+ENERGY_USE_RESIDUAL = False           # τr = 0 in G_c, as arrest_indices.evaluate(use_residual=False)
+ENERGY_R            = None            # energy ratio R; None = arrest_indices.R_FIT (Meloche Fig. 8 fit). Set only for sensitivity runs
+
+# -----------------------------------------------------------------------
 # Scenario sweep
 # -----------------------------------------------------------------------
 # Number of trigger clusters to evaluate. Dropped 5 → 3 on 2026-10-09: five
