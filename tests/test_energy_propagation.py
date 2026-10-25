@@ -209,6 +209,36 @@ def test_laterally_reached_cell_starts_at_zero_tension():
     assert cross and all(c['N'] == 0.0 for c in cross)
 
 
+def _polygon(s, mask):
+    return make_release_polygon_2d(
+        trigger_cluster_id=s['trigger'], A_ca=50.0, meloche_df=pd.DataFrame(),
+        cluster_map=s['cluster_map'], dem=s['dem'], transform=T,
+        start_zone_mask=mask, snap_features=s['feats'],
+        pixel_index=s['pixel_index'], max_clusters=100000)
+
+
+def test_mask_gate_versus_diagnostic(monkeypatch):
+    """Step 4: 'gate' stops at the mask and clips; 'diagnostic' ignores it."""
+    from release_areas.generate_scenarios import frac_outside_mask
+    s = scene(30, 60, (16, 31), lambda y, x: {})
+    mask = np.zeros(s['cluster_map'].shape, bool)
+    mask[:, :45] = True                              # east quarter outside
+    gated = _polygon(s, mask)
+    assert frac_outside_mask(gated, mask, T) == 0.0
+    monkeypatch.setattr(config, 'MASK_MODE', 'diagnostic')
+    diag = _polygon(s, mask)
+    assert diag.area == pytest.approx(30 * 60)
+    assert frac_outside_mask(diag, mask, T) == pytest.approx(0.25)
+    assert diag.area > gated.area
+
+
+def test_unknown_mask_mode_raises(monkeypatch):
+    monkeypatch.setattr(config, 'MASK_MODE', 'nonsense')
+    s = scene(30, 30, (16, 16), lambda y, x: {})
+    with pytest.raises(ValueError):
+        _polygon(s, None)
+
+
 def test_unknown_mode_raises(monkeypatch):
     monkeypatch.setattr(config, 'ARREST_MODE', 'nonsense')
     s = scene(30, 30, (16, 16), lambda y, x: {})

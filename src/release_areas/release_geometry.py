@@ -454,6 +454,8 @@ def make_release_polygon_2d(
     """
     Build a 2D release polygon.
 
+    config.MASK_MODE == 'diagnostic' ignores start_zone_mask (no BFS gate, no clip).
+
     In config.ARREST_MODE == 'energy' there is no rectangle fallback and no
     MIN_POLYGON_AREA floor: a trigger-only arrest is the result, not a failure.
 
@@ -467,6 +469,11 @@ def make_release_polygon_2d(
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
     import rasterio.features
+
+    if config.MASK_MODE not in ('gate', 'diagnostic'):
+        raise ValueError(f"unknown config.MASK_MODE {config.MASK_MODE!r}")
+    if config.MASK_MODE == 'diagnostic':
+        start_zone_mask = None      # mask is used only in reporting
 
     px_m = abs(transform.a) if transform is not None else 1.0
     slope_grid, aspect_grid = compute_slope_aspect(dem, px_m)

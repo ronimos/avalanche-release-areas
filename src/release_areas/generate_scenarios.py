@@ -122,6 +122,18 @@ def load_kml_mask(kml_path: Path, dem_shape, transform,
     return mask
 
 
+def frac_outside_mask(poly, mask: np.ndarray, transform) -> float:
+    """Share of the polygon's 1 m pixels outside the start-zone mask (NaN if no polygon)."""
+    import rasterio.features
+    if poly is None or poly.is_empty:
+        return float('nan')
+    inside = rasterio.features.geometry_mask(
+        [poly.__geo_interface__], out_shape=mask.shape,
+        transform=transform, invert=True)
+    n = int(inside.sum())
+    return float((inside & ~mask).sum() / n) if n else float('nan')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -171,6 +183,11 @@ def main():
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
                          'A_ca_brittle and Pi1_elastic are read from the CSV '
                          'and keep the delta they were generated with.')
+    ap.add_argument('--mask-mode', choices=('gate', 'diagnostic'),
+                    default=config.MASK_MODE,
+                    help=f'Start-zone mask use (default: {config.MASK_MODE}). '
+                         "'diagnostic' runs the BFS on the whole cluster map and "
+                         'adds frac_outside_mask to scenario_summary.csv.')
     args = ap.parse_args()
 
     # propagate_crack reads these from config, so set them before any run.
@@ -181,6 +198,7 @@ def main():
     config.DELTA = args.delta
     _rg.MELOCHE_DELTA = args.delta
     config.ARREST_MODE = args.arrest_mode
+    config.MASK_MODE = args.mask_mode
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)
@@ -419,6 +437,9 @@ def main():
                     'release_area_m2':  0.0,
                     'iou':              0.0,
                 }
+            if config.MASK_MODE == 'diagnostic':
+                row['frac_outside_mask'] = frac_outside_mask(
+                    poly, start_zone_mask, transform)
             scenarios.append(row)
             if energy_state:
                 sdir = out_dir / 'scenarios' / sid

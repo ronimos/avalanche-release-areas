@@ -304,7 +304,8 @@ USE_MELOCHE_ARREST = True
 ARREST_MODE         = 'legacy'        # BFS arrest rule: 'legacy' (propagate_crack as before) or 'energy' (path energy)
 SIGMA_T_COLUMN      = 'sigma_t_mean'  # thickness-weighted slab σt; 'sigma_t_wl' = weakest-link bound (methods §4)
 ENERGY_USE_RESIDUAL = False           # τr = 0 in G_c, as arrest_indices.evaluate(use_residual=False)
-ENERGY_R            = None            # energy ratio R; None = arrest_indices.R_FIT (Meloche Fig. 8 fit). Set only for sensitivity runs
+MASK_MODE           = 'gate'          # start-zone KML: 'gate' (BFS rejects, polygon clipped) or 'diagnostic' (reporting only); brief Step 4
+ENERGY_R            = None           # energy ratio R; None = arrest_indices.R_FIT (Meloche Fig. 8 fit). Set only for sensitivity runs
 
 # -----------------------------------------------------------------------
 # Scenario sweep
