@@ -181,6 +181,11 @@ def main():
                          "energy_rejected.csv per scenario. 'slope_only' and "
                          "'sk38_connected' are mechanics-free baselines "
                          '(baselines.py); they write rejected.csv.')
+    ap.add_argument('--slab-tensile-gate', action=argparse.BooleanOptionalAction,
+                    default=config.USE_SLAB_TENSILE_GATE,
+                    help='Legacy mode: also arrest where the slab breaks in tension '
+                         'before the crack reaches r_c (Schweizer et al. 2014; '
+                         f'default: {config.USE_SLAB_TENSILE_GATE}).')
     ap.add_argument('--delta', type=float, default=config.DELTA,
                     help=f'Meloche softening coefficient for the BFS Eq. 20 test '
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
@@ -202,6 +207,7 @@ def main():
     _rg.MELOCHE_DELTA = args.delta
     config.ARREST_MODE = args.arrest_mode
     config.MASK_MODE = args.mask_mode
+    config.USE_SLAB_TENSILE_GATE = args.slab_tensile_gate
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)

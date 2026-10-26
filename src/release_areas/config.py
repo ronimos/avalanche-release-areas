@@ -104,6 +104,10 @@ THETA_VALID_MAX = 5000.0    # Pa/m
 # boundary.
 FACET_STRENGTH_FACTOR = 0.5
 
+# Extra sigma_t(rho) relations emitted by aggregate_slab as
+# sigma_t_mean__<name> / sigma_t_wl__<name> (arrest_indices.ST_RELATIONS).
+ST_RELATIONS_EXTRA = ('jamieson1990',)
+
 # None = f is 1 - sphericity outright. Our rounded-grain layers sit at
 # sphericity ~0.86, so they carry f ~0.14 and lose ~7% of sigma_t; measured
 # over the Jan 18 slabs this lowers sigma_t_mean to 0.85x the bulk value.
@@ -297,6 +301,16 @@ MAX_BFS_CLUSTERS      = 2000   # safety cap on region size; see methods §5
 # discontinuity heuristics; TAU_G_ABS_FLOOR, thin slab, low Λ and the distance
 # caps still apply. See methods §5.
 USE_MELOCHE_ARREST = True
+
+# Slab tensile-failure gate (Ron, 2026-10-26; OFF by default). Arrest a
+# candidate whose slab would break in tension before its weak-layer crack
+# reaches critical length: S_t = sigma_t / (3 rho g r_c^2 / h) < 1, Schweizer et
+# al. (2014), via arrest_indices.slab_tensile_support. Per-cluster, after the
+# tau_g / thin-slab / low-Lambda gates. sigma_t is Jamieson & Johnston (1990)
+# with the facet knockdown, the strength relation the 2014 paper uses. The
+# threshold is 1, not a fit. Same gate as ~/avachain release_geometry.
+USE_SLAB_TENSILE_GATE  = False
+SLAB_TENSILE_SIGMA_COL = 'sigma_t_mean__jamieson1990'
 
 # -----------------------------------------------------------------------
 # Path-energy arrest (energy_path.py) — hypothesis, see methods §3

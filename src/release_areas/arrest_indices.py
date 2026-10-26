@@ -135,6 +135,30 @@ def tensile_length(sigma_t, k):
         return np.where(k > 0, sigma_t / k, np.inf)
 
 
+def slab_tensile_stress_cantilever(rho, h, l):
+    """sigma_max = 3 rho g l^2 / h (Pa): bending stress at the surface of an
+    unsupported slab of thickness h over a crack of length l.
+
+    SOURCE: Schweizer, Reuter, van Herwijnen, Gauthier & Jamieson (2014), "On
+    how the tensile strength of the slab affects crack propagation
+    propensity", ISSW 2014, Eq. 1: a horizontal cantilever under its own
+    weight, evaluated at l = r_c. Flat: no slope term, no E, no nu. Their check:
+    rho = 100, h = 0.3 m, r_c = 0.2 m gives ~400 Pa. Reuter & Schweizer (2018,
+    GRL 45, 7019) replace it with FE stresses and a layered index whose exact
+    form we could not read; this is the closed form, not that index.
+    """
+    return 3.0 * np.asarray(rho, dtype=float) * G_ACC * np.asarray(l, dtype=float) ** 2 \
+        / np.asarray(h, dtype=float)
+
+
+def slab_tensile_support(sigma_t, rho, h, r_c):
+    """S_t = sigma_t / sigma_max(l = r_c). S_t < 1: the slab breaks in tension
+    before the weak-layer crack reaches critical length, so it cannot carry
+    propagation (Schweizer et al. 2014). The threshold 1 is stress = strength,
+    not a fit."""
+    return np.asarray(sigma_t, dtype=float) / slab_tensile_stress_cantilever(rho, h, r_c)
+
+
 C_FIT = 0.045  # fitted from Meloche et al. 2025 Fig. 8 (two runs); see docs/release_area_methods.md §3
 
 
@@ -222,6 +246,30 @@ def slab_tensile_strength(rho, scale=ST_RHO_SCALE, exp=ST_RHO_EXP, rho_ref=RHO_R
     Neither paper publishes a sigma_t(rho) regression.
     """
     return (np.asarray(rho, dtype=float) / rho_ref) ** exp * scale
+
+
+JJ1990_SCALE = 79.7e3   # Pa; Jamieson & Johnston (1990) J. Glaciol. 36(122), Table III, group I
+JJ1990_EXP   = 2.39
+JJ1990_RHO_ICE = 917.0  # kg m-3, as in their Eq. 4
+
+
+def slab_tensile_strength_jamieson1990(rho, scale=JJ1990_SCALE, exp=JJ1990_EXP,
+                                       rho_ice=JJ1990_RHO_ICE):
+    """sigma_t(rho) = 79.7 (rho/rho_ice)^2.39 kPa, in-situ, rounded grains.
+
+    SOURCE: Jamieson & Johnston (1990), J. Glaciol. 36(122), 102-106, Table III
+    and Conclusions: group I (new, partly settled or rounded grains), 43 layers,
+    rho = 100-345 kg m-3. Their faceted fit (58.3, 2.65; 23 layers, 190-260) is
+    not used: facets are handled by FACET_STRENGTH_FACTOR, their own factor-2 finding.
+    Ported from ~/avachain (1402165).
+    """
+    return scale * (np.asarray(rho, dtype=float) / rho_ice) ** exp
+
+
+# 'sigrist2006' (ETH Diss. 16736, lab) is not implemented: the thesis was not
+# obtainable on 2026-10-25 and the regression is not to be coded from memory.
+ST_RELATIONS = {'project_fit': slab_tensile_strength,
+                'jamieson1990': slab_tensile_strength_jamieson1990}
 
 
 # ---------------------------------------------------------------------------
@@ -585,7 +633,8 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
                    k_ic_relation=None, ligament_model='elhaddad',
                    grain_size_i=None, dmax_factor=DMAX_FACTOR,
                    e_relation=E_DEFAULT, e_relations_extra=(),
-                   k_ic_variants=(), self_consistent_a0=False):
+                   k_ic_variants=(), self_consistent_a0=False,
+                   st_relations_extra=()):
     """Layered-slab aggregation for Eq. 20. Returns a dict of scalars.
 
     E_eff, sigma_t_mean, sigma_t_wl and the index/depth/thickness of the layer
@@ -600,6 +649,9 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
     names emitted as E_eff__<name>. k_ic_variants is a list of
     (label, relation, dmax_factor) emitted as <key>__<label>, in addition to
     the unsuffixed bound from k_ic_relation.
+        st_relations_extra names extra sigma_t(rho) relations (ST_RELATIONS),
+    emitted as sigma_t_mean__<name> and sigma_t_wl__<name> with the same facet
+    knockdown.
     """
     rho = np.asarray(rho_i, dtype=float)
     dz = np.asarray(dz_i, dtype=float)
@@ -627,6 +679,10 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
     for name in e_relations_extra:
         out[f'E_eff__{name}'] = effective_modulus(slab_modulus(rho, name), dz)
     out['sigma_t_mean'] = tensile_strength_mean(st, dz)
+    for name in st_relations_extra:
+        st_x = ST_RELATIONS[name](rho) * (1.0 - a * f)
+        out[f'sigma_t_mean__{name}'] = tensile_strength_mean(st_x, dz)
+        out[f'sigma_t_wl__{name}'] = tensile_strength_weakest_link(st_x, E, dz)[0]
     out['f_mean_weighted'] = tensile_strength_mean(f, dz)
     st_wl, idx = tensile_strength_weakest_link(st, E, dz)
     out['sigma_t_wl'] = st_wl

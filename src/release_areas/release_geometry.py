@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 from release_areas import config
-from release_areas.arrest_indices import arrest_length
+from release_areas.arrest_indices import arrest_length, slab_tensile_support
 
 # Re-exported for backwards compatibility; config is the source of truth.
 STAUCHWALL_DEG     = config.STAUCHWALL_DEG
@@ -731,7 +731,8 @@ def propagate_crack(
                     props[c] = float(first_scalar(meloche_df.loc[cid, c]))
         if snap_features is not None and cid in snap_features.index:
             for c in ['slab_thickness', 'slab_density',
-                      'wl_shear_strength', 'sigma_t']:
+                      'wl_shear_strength', 'sigma_t',
+                      config.SLAB_TENSILE_SIGMA_COL]:
                 if c in snap_features.columns:
                     try:
                         props[c] = float(first_scalar(snap_features.loc[cid, c]))
@@ -796,6 +797,16 @@ def propagate_crack(
         lam_nbr_abs = directional_lambda(nbr_props, is_cross)
         if not np.isnan(lam_nbr_abs) and lam_nbr_abs < MIN_PROPAGATION_LAMBDA:
             return False, 'low_lambda'
+
+        # Slab tensile failure: the slab breaks before the crack reaches r_c.
+        # A cluster missing any input is not gated (as for the gates above).
+        if config.USE_SLAB_TENSILE_GATE:
+            s_t = slab_tensile_support(
+                nbr_props.get(config.SLAB_TENSILE_SIGMA_COL, np.nan),
+                nbr_props.get('slab_density', np.nan), h_nbr,
+                nbr_props.get('rc_wl', np.nan))
+            if np.isfinite(s_t) and s_t < 1.0:
+                return False, 'slab_tensile_failure'
 
         if USE_MELOCHE_ARREST:
             cur_cid = current_props.get('cid')

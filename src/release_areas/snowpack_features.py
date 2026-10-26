@@ -446,6 +446,7 @@ def _slab_layer_aggregate(ds_t_loc, slab_sel, dz, z) -> dict:
         grain_size_i=gsz, dmax_factor=config.DMAX_FACTOR,
         e_relation=config.E_RELATION,
         e_relations_extra=config.E_RELATIONS_EXTRA,
+        st_relations_extra=config.ST_RELATIONS_EXTRA,
         k_ic_variants=(config.LIGAMENT_VARIANTS
                        if config.USE_LIGAMENT_BOUND else ()),
         self_consistent_a0=config.SELF_CONSISTENT_A0)
