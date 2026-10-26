@@ -288,6 +288,14 @@ def main():
     print(f"  Candidates after slab_thickness {MIN_SLAB_THICKNESS}–{MAX_SLAB_THICKNESS} m filter: "
           f"{len(candidate_ids)}")
 
+    # Slab tensile gate on the trigger: rank only triggers whose slab can carry
+    # a crack to r_c, so the ranking still yields n_triggers releases.
+    if config.USE_SLAB_TENSILE_GATE and config.ARREST_MODE == 'legacy':
+        candidate_ids = [
+            cid for cid in candidate_ids
+            if not (_rg.cluster_tensile_support(cid, meloche_df, features_df) < 1.0)]
+        print(f"  Candidates after slab tensile support S_t >= 1: {len(candidate_ids)}")
+
     # Filter 3: elevation — keep upper P50 of candidate zone
     if candidate_ids:
         elev_pairs = []
