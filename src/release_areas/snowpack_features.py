@@ -429,6 +429,7 @@ def _slab_layer_aggregate(ds_t_loc, slab_sel, dz, z) -> dict:
         rho = ds_t_loc['density'].values.ravel()[slab_sel]
         sp  = ds_t_loc['sphericity'].values.ravel()[slab_sel]
         dd  = ds_t_loc['dendricity'].values.ravel()[slab_sel]
+        gt  = ds_t_loc['grain_type'].values.ravel()[slab_sel]
     except Exception:
         return {k: np.nan for k in keys}
     try:
@@ -438,6 +439,7 @@ def _slab_layer_aggregate(ds_t_loc, slab_sel, dz, z) -> dict:
     return _ai.aggregate_slab(
         rho, dz[slab_sel], sp, dd,
         a=config.FACET_STRENGTH_FACTOR, sp_ref=config.FACET_SP_REF,
+        grain_type_i=gt, facet_source=config.FACET_SOURCE,
         depth_i=-z[slab_sel],
         K_Ic=config.SLAB_K_IC if config.USE_LIGAMENT_BOUND else None,
         k_ic_relation=(config.K_IC_RELATION if config.USE_LIGAMENT_BOUND

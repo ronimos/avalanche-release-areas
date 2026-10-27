@@ -99,16 +99,25 @@ THETA_VALID_MAX = 5000.0    # Pa/m
 # Layered-slab aggregation of sigma_t and E (arrest_indices.aggregate_slab)
 # -----------------------------------------------------------------------
 # Faceted snow is about half as strong in tension as rounded snow at equal
-# density (Jamieson & Johnston 1990), applied continuously via
-# f = 1 - sphericity so neighbouring cells cannot step across a grain-type
-# boundary.
+# density (Jamieson & Johnston 1990): sigma_t,i = sigma_t,RG(rho_i) (1 - a f_i).
 FACET_STRENGTH_FACTOR = 0.5
+
+# How f is derived. 'grain_class' (Ron, 2026-10-27) sets f = 1 for the
+# primary classes in FACETED_GRAIN_CLASSES (SNOWPACK 4xx FC, 5xx DH, 9xx FCxr)
+# and 0 otherwise, as J&J grouped their layers. 'sphericity' is the earlier
+# continuous f = 1 - sphericity, which under-counts FCxr: over the Jan 18
+# start-zone slabs it gave f 0.35 inside the release / 0.52 outside, against
+# 0.50 / 1.00 by grain class. The Eq. 20 arrest reads the plain sigma_t
+# column, which has no knockdown, so this moves sigma_t_mean/_wl/_ligament
+# (and A_ca_* built on them), the energy mode and the slab tensile gate.
+FACET_SOURCE = 'grain_class'
+FACETED_GRAIN_CLASSES = (4, 5, 9)
 
 # Extra sigma_t(rho) relations emitted by aggregate_slab as
 # sigma_t_mean__<name> / sigma_t_wl__<name> (arrest_indices.ST_RELATIONS).
 ST_RELATIONS_EXTRA = ('jamieson1990',)
 
-# None = f is 1 - sphericity outright. Our rounded-grain layers sit at
+# FACET_SOURCE = 'sphericity' only. None = f is 1 - sphericity outright. Our rounded-grain layers sit at
 # sphericity ~0.86, so they carry f ~0.14 and lose ~7% of sigma_t; measured
 # over the Jan 18 slabs this lowers sigma_t_mean to 0.85x the bulk value.
 # Setting this to 0.86 instead anchors f so typical RG keeps the unmodified
@@ -307,8 +316,8 @@ USE_MELOCHE_ARREST = True
 # reaches critical length: S_t = sigma_t / (3 rho g r_c^2 / h) < 1, Schweizer et
 # al. (2014), via arrest_indices.slab_tensile_support. Per-cluster, after the
 # tau_g / thin-slab / low-Lambda gates. sigma_t is Jamieson & Johnston (1990)
-# with the facet knockdown, the strength relation the 2014 paper uses. The
-# threshold is 1, not a fit. Same gate as ~/avachain release_geometry.
+# with the facet knockdown (f by grain class since 2026-10-27, FACET_SOURCE),
+# the strength relation the 2014 paper uses. The threshold is 1, not a fit. Same gate as ~/avachain release_geometry.
 USE_SLAB_TENSILE_GATE  = False
 SLAB_TENSILE_SIGMA_COL = 'sigma_t_mean__jamieson1990'
 

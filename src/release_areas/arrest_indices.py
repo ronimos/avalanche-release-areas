@@ -12,6 +12,7 @@ from release_areas.config import (
     MODE2_SPEED_RATIO,
     MODE3_SPEED_RATIO,
     FACET_STRENGTH_FACTOR,
+    FACETED_GRAIN_CLASSES,
     DMAX_FACTOR,
 )
 
@@ -294,6 +295,25 @@ def facetedness(sphericity, dendricity, sp_ref=None):
     f = (1.0 - sp) if sp_ref is None else (sp_ref - sp) / sp_ref
     f = np.where(dd == 0.0, f, 0.0)
     return np.clip(np.where(np.isfinite(f), f, 0.0), 0.0, 1.0)
+
+
+def facetedness_grain_class(grain_type, classes=FACETED_GRAIN_CLASSES):
+    """f in {0, 1}: 1 where the primary grain class (code // 100) is faceted.
+
+    The categorical reading of Jamieson & Johnston (1990), who grouped by
+    grain class. 1 - sphericity under-counts FCxr as faceted (sphericity
+    rises as facets round), so it gives them only part of the knockdown.
+    Missing or non-positive codes get f = 0.
+    """
+    gt = np.asarray(grain_type, dtype=float)
+    ok = np.isfinite(gt) & (gt > 0)
+    cls = np.where(ok, np.round(np.where(ok, gt, 0.0)) // 100, -1)
+    return np.where(ok & np.isin(cls, classes), 1.0, 0.0)
+
+
+# How f is derived: 'grain_class' (config.FACETED_GRAIN_CLASSES) or
+# 'sphericity' (1 - sphericity, the form before 2026-10-27).
+FACET_SOURCES = ('grain_class', 'sphericity')
 
 
 def layer_tensile_strength(rho, f, a=FACET_STRENGTH_FACTOR, **kw):
@@ -634,7 +654,8 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
                    grain_size_i=None, dmax_factor=DMAX_FACTOR,
                    e_relation=E_DEFAULT, e_relations_extra=(),
                    k_ic_variants=(), self_consistent_a0=False,
-                   st_relations_extra=()):
+                   st_relations_extra=(), grain_type_i=None,
+                   facet_source='sphericity'):
     """Layered-slab aggregation for Eq. 20. Returns a dict of scalars.
 
     E_eff, sigma_t_mean, sigma_t_wl and the index/depth/thickness of the layer
@@ -648,11 +669,18 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
     e_relation picks the E(rho) relation; e_relations_extra is a list of extra
     names emitted as E_eff__<name>. k_ic_variants is a list of
     (label, relation, dmax_factor) emitted as <key>__<label>, in addition to
-    the unsuffixed bound from k_ic_relation.
-        st_relations_extra names extra sigma_t(rho) relations (ST_RELATIONS),
-    emitted as sigma_t_mean__<name> and sigma_t_wl__<name> with the same facet
-    knockdown.
+    the unsuffixed bound from k_ic_relation. st_relations_extra names extra
+    sigma_t(rho) relations (ST_RELATIONS), emitted as sigma_t_mean__<name> and
+    sigma_t_wl__<name> with the same facet knockdown.
+
+    facet_source picks f: 'sphericity' (facetedness, from sphericity_i and
+    dendricity_i) or 'grain_class' (facetedness_grain_class, from
+    grain_type_i, which is then required).
     """
+    if facet_source not in FACET_SOURCES:
+        raise ValueError(f'facet_source {facet_source!r} not in {FACET_SOURCES}')
+    if facet_source == 'grain_class' and grain_type_i is None:
+        raise ValueError("facet_source='grain_class' needs grain_type_i")
     rho = np.asarray(rho_i, dtype=float)
     dz = np.asarray(dz_i, dtype=float)
     ok = np.isfinite(rho) & np.isfinite(dz) & (dz > 0) & (rho > 0)
@@ -670,8 +698,11 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
     rho, dz = rho[ok], dz[ok]
     gsz = (None if grain_size_i is None
            else np.asarray(grain_size_i, dtype=float)[ok])
-    f = facetedness(np.asarray(sphericity_i, dtype=float)[ok],
-                    np.asarray(dendricity_i, dtype=float)[ok], sp_ref)
+    if facet_source == 'grain_class':
+        f = facetedness_grain_class(np.asarray(grain_type_i, dtype=float)[ok])
+    else:
+        f = facetedness(np.asarray(sphericity_i, dtype=float)[ok],
+                        np.asarray(dendricity_i, dtype=float)[ok], sp_ref)
     E = slab_modulus(rho, e_relation)
     st = layer_tensile_strength(rho, f, a)
 
