@@ -2,6 +2,11 @@
 
 Reference is outputs/baseline/scenario_summary.csv, generated 2026-10-24 at
 commit 31e5192 with the README quick-start command and all defaults.
+
+Re-pinned 2026-10-27 for STAUCHWALL_DEG 28 -> 29 (Ron). With
+--stauchwall-deg 28 the run still reproduces the old reference exactly
+(2859 6019 m2 / 0.702, 5656 4911 / 0.644, 6191 5618 / 0.542). At 29 the
+trigger slope gate is 31 deg and the third trigger becomes 2858.
 """
 import subprocess
 import sys
@@ -15,9 +20,9 @@ DATA = REPO / 'data' / 'little_prof'
 
 # trigger_cluster -> (release_area_m2, iou)
 REFERENCE = {
-    2859: (6019.0, 0.7017644382928663),
-    5656: (4911.0, 0.6437929115104777),
-    6191: (5618.0, 0.5424553852778091),
+    2859: (3819.0, 0.4911404831679284),
+    5656: (4896.0, 0.6426230691834846),
+    2858: (5360.0, 0.646098387369389),
 }
 
 

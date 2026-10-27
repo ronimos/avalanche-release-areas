@@ -7,7 +7,7 @@ Provides:
     project_along_aspect()       Project a UTM point distance along slope aspect
     make_release_polygon_2d()    Full 2D release polygon from four constraints:
                                    1. Meloche A_ca (upslope)
-                                   2. ~28° slope threshold (downslope / stauchwall)
+                                   2. ~29° slope threshold (downslope / stauchwall)
                                    3. θ cross-slope gradient (flanks)
                                    4. Start zone KML (hard lateral boundary)
     propagate_crack()            Spatial crack propagation: BFS cluster flood-fill

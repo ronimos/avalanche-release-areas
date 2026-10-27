@@ -175,7 +175,7 @@ ELEVATION_PCTILE   = 50     # keep clusters at or above this elevation percentil
 # -----------------------------------------------------------------------
 # BFS crack propagation
 # -----------------------------------------------------------------------
-STAUCHWALL_DEG        = 28.0   # slope threshold for downslope arrest
+STAUCHWALL_DEG        = 29.0   # slope threshold for downslope arrest; Ron 2026-10-27, was 28.0
 GAUME_ASPECT_CAP      = 2.5    # max cross-slope width / A_ca
 MIN_POLYGON_AREA      = 200.0  # m²; discard smaller polygons
 TAU_G_ABS_FLOOR       = 350.0  # Pa; absolute driving-stress floor
