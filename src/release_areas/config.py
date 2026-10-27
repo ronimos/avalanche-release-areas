@@ -315,14 +315,19 @@ MAX_BFS_CLUSTERS      = 2000   # safety cap on region size; see methods §5
 # caps still apply. See methods §5.
 USE_MELOCHE_ARREST = True
 
-# Slab tensile-failure gate (Ron, 2026-10-26; OFF by default). Arrest a
+# Slab tensile-failure gate (Ron, 2026-10-26; ON by default since 2026-10-27,
+# Ron, matching ~/avachain; --no-slab-tensile-gate turns it off). Arrest a
 # candidate whose slab would break in tension before its weak-layer crack
 # reaches critical length: S_t = sigma_t / (3 rho g r_c^2 / h) < 1, Schweizer et
 # al. (2014), via arrest_indices.slab_tensile_support. Per-cluster, after the
 # tau_g / thin-slab / low-Lambda gates. sigma_t is Jamieson & Johnston (1990)
 # with the facet knockdown (f by grain class since 2026-10-27, FACET_SOURCE),
 # the strength relation the 2014 paper uses. The threshold is 1, not a fit. Same gate as ~/avachain release_geometry.
-USE_SLAB_TENSILE_GATE  = False
+# Why on: S_t beat every random-arrest control of the same count, and with
+# grain-class sigma_t it costs no trigger it lets through. Against: where S_t = 1
+# falls depends on how r_c is scaled. A CSV without SLAB_TENSILE_SIGMA_COL turns
+# it into a no-op; generate_scenarios warns when that happens.
+USE_SLAB_TENSILE_GATE  = True
 SLAB_TENSILE_SIGMA_COL = 'sigma_t_mean__jamieson1990'
 
 # -----------------------------------------------------------------------

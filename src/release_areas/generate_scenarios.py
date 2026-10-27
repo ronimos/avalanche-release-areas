@@ -290,6 +290,11 @@ def main():
 
     # Slab tensile gate on the trigger: rank only triggers whose slab can carry
     # a crack to r_c, so the ranking still yields n_triggers releases.
+    if (config.USE_SLAB_TENSILE_GATE and config.ARREST_MODE == 'legacy'
+            and config.SLAB_TENSILE_SIGMA_COL not in features_df.columns):
+        print(f"  WARNING: slab tensile gate is on but the features CSV has no "
+              f"'{config.SLAB_TENSILE_SIGMA_COL}' column, so it never fires; "
+              f"regenerate the CSV")
     if config.USE_SLAB_TENSILE_GATE and config.ARREST_MODE == 'legacy':
         candidate_ids = [
             cid for cid in candidate_ids

@@ -42,10 +42,10 @@ class TestFormula:
         assert ai.slab_tensile_support(2000.0, 330.0, 1.0, 0.4) == pytest.approx(base / 2)
 
 
-def test_off_by_default():
+def test_on_by_default():
     import re
     src = Path(config.__file__).read_text()
-    assert re.search(r'^USE_SLAB_TENSILE_GATE\s*=\s*False\b', src, re.M)
+    assert re.search(r'^USE_SLAB_TENSILE_GATE\s*=\s*True\b', src, re.M)
 
 
 @pytest.fixture
