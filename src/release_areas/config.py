@@ -102,16 +102,20 @@ THETA_VALID_MAX = 5000.0    # Pa/m
 # density (Jamieson & Johnston 1990): sigma_t,i = sigma_t,RG(rho_i) (1 - a f_i).
 FACET_STRENGTH_FACTOR = 0.5
 
-# How f is derived. 'grain_class' (Ron, 2026-10-27) sets f = 1 for the
-# primary classes in FACETED_GRAIN_CLASSES (SNOWPACK 4xx FC, 5xx DH, 9xx FCxr)
-# and 0 otherwise, as J&J grouped their layers. 'sphericity' is the earlier
-# continuous f = 1 - sphericity, which under-counts FCxr: over the Jan 18
-# start-zone slabs it gave f 0.35 inside the release / 0.52 outside, against
-# 0.50 / 1.00 by grain class. The Eq. 20 arrest reads the plain sigma_t
+# How f is derived. 'grain_class' (Ron, 2026-10-27) sets f = 1 for J&J's
+# group II, "layers of faceted grains and of layers of grains which showed
+# both faceting and rounding": primary class in FACETED_GRAIN_CLASSES
+# (SNOWPACK 4 FC, 5 DH, 9 FCxr), or a MIXED_PRIMARY_CLASSES primary (PP/DF/RG,
+# their group I) with a faceted secondary, e.g. 341; 0 otherwise. Melt forms
+# stay 0 (J&J tested none). 'grain_class_primary' ignores the secondary.
+# 'sphericity' is the earlier continuous f = 1 - sphericity, which
+# under-counts FCxr: over the Jan 18 start-zone slabs it gave f 0.35 inside
+# the release / 0.52 outside, against 0.50 / 1.00 by primary class. The Eq. 20 arrest reads the plain sigma_t
 # column, which has no knockdown, so this moves sigma_t_mean/_wl/_ligament
 # (and A_ca_* built on them), the energy mode and the slab tensile gate.
 FACET_SOURCE = 'grain_class'
 FACETED_GRAIN_CLASSES = (4, 5, 9)
+MIXED_PRIMARY_CLASSES = (1, 2, 3)
 
 # Extra sigma_t(rho) relations emitted by aggregate_slab as
 # sigma_t_mean__<name> / sigma_t_wl__<name> (arrest_indices.ST_RELATIONS).
