@@ -760,7 +760,7 @@ and `LIG_OUT_DIR` for output:
 
 | Script | Produces |
 |---|---|
-| `examples/regenerate_jan18_reference_csvs.py` | the committed reference CSV pair, from the current defaults. Pins the cluster set and `group` labels from `*_v1.csv` so only parameter generation varies. |
+| `examples/regenerate_jan18_reference_csvs.py` | the committed reference CSV pair, from the current defaults, at snapshot 2026-01-18 12:00. avachain's `analyze` reads 00:00, so a few triggers differ in area between the repos. Since the 2026-10-27 rebuild, both times are before the scour. It pins the cluster set and `group` labels from `*_v1.csv`, so only parameter generation varies. The current pair comes from avachain's 2026-10-27 forcing rebuild. |
 | `examples/spacetime_ligament_pass.py` | one `.npz` per location block for the full space-time run (§4). `LIG_OUT_DIR` / `LIG_ZARR` override the paths; the default output is under `/tmp`. |
 | `examples/spacetime_ligament_stats.py` | the §4 "Measured parameter statistics" tables from those blocks. |
 | `examples/compute_indices_from_xsnow.py` | illustrative only — placeholder paths, and it deliberately does **not** write to `data/little_prof/features`. |
@@ -1183,6 +1183,39 @@ The BFS crack-propagation pipeline (`generate_scenarios.py`) selects the top `co
 
 The earlier 4 550 m² crown was an older mapping of the same feature (IoU 0.638
 against the current one); all numbers below use the 6 934 m² polygon.
+
+**Current defaults, current reference CSVs (2026-10-27).** The reference CSVs
+were regenerated from avachain's 2026-10-27 forcing rebuild, which removed 21
+false avalanche corrections (Jan 18 is the only avalanche of the season). The
+defaults are now: slab tensile gate on, `FACET_SOURCE = 'grain_class'`,
+Stauchwall 29°, so the trigger slope gate is 31°. The default run gives:
+
+| Stage | Surviving clusters |
+|---|---|
+| Start-zone clusters with features | 1608 |
+| τg ≥ 40 Pa, slope ≥ 31°, Sk38 < 1.0 | 197 |
+| Slab thickness 0.5–2.0 m | 164 |
+| S_t ≥ 1 | 164 |
+| Elevation ≥ P50 (3664 m) | 82 |
+| Π₁ ≥ median (37.34) | 41 |
+
+| Trigger | Area (m²), gate on | Area (m²), gate off | IoU vs 6 934 m² crown, gate on |
+|---|---|---|---|
+| 1772 | 612 | 615 | 0.051 |
+| 4300 | 1 576 | 1 585 | 0.093 |
+| 2375 | 1 268 | 1 281 | 0.090 |
+
+`tests/test_regression_jan18.py` pins both columns. The polygons are small
+because each trigger is walled in by a neighbouring cluster whose mean slope
+is just under 29° (§5, Stauchwall). The validation target is now avachain's
+survey-derived polygon (5 810 m²; IoU 0.65 against the crown shipped here).
+Against it, avachain's event-level score is in §5 under "Slab tensile gate".
+
+**Everything from here to the end of the 2×2 discussion is the 2026-10-09
+configuration** (gate off, sphericity facets, Stauchwall 28°, pre-rebuild
+CSVs). It is kept as the record of how those corrections were chosen. It does
+**not** reproduce from the current reference CSVs, and neither does the
+2026-10-18 figure.
 
 Filter chain output (Jan 18 2026), one count per stage:
 
