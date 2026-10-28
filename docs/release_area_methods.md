@@ -918,17 +918,100 @@ the mode III cap — not θ.
 
 ### Trigger cluster selection (`generate_scenarios`)
 
-Candidate trigger locations are selected by a four-stage filter applied to all start-zone clusters, then ranked by stability index:
+A trigger is a cluster where a skier or an explosive could start a weak-layer
+crack that then propagates. The model picks N of them, and each one seeds a
+BFS release polygon (next subsection). Selection is a filter chain over the
+start-zone clusters, followed by a stability ranking. The code is
+`generate_scenarios.main` here and `analysis_pipeline.step_scenarios` in
+avachain; the two must stay in step.
 
-| Stage | Criterion | Rationale |
+**Inputs per cluster.**
+
+| Quantity | Column (CSV) | How it is computed |
 |---|---|---|
-| 1 | τg ≥ 40 Pa; slope ≥ (stauchwall_deg + 2°); Sk38 < 1.0 | Minimum gravitational driving stress, terrain steep enough to sustain crack propagation, and unstable stability index |
-| 2 | 0.5 m ≤ h ≤ max_slab_thickness (default 2.0 m, sized for explosive control; 1.5 m for skier scenarios), **or h is NaN** | Exclude implausibly thin slabs and slabs too deep for the control method to trigger. Clusters with no measured slab thickness are *kept*, not rejected |
-| 2b | S_t ≥ 1 (slab tensile gate, on by default since 2026-10-27) | A slab that breaks in tension before its own crack reaches r_c cannot start a release. Applied before the ranking so it still yields N triggers |
-| 3 | Elevation ≥ P50 of remaining candidates | Prefer upper start-zone cells — lower cells may be in runout or deposition |
-| 4 | Π₁ ≥ median of candidates (propagation gate) | Π₁ = τg / (θ Λ √(1+δ)); retain clusters where the dimensionless driving ratio exceeds the group median, i.e., where propagation is relatively more likely |
+| Sk38 | `min_sk38` (features) | SNOWPACK's skier stability index at a 38° reference slope (Jamieson & Johnston 1998), minimum over the elements within ±5 cm of the slab/WL interface found by the basal-WL split (§4) |
+| Slope ψ | `slope_angle` (meloche) | Mean of the 1 m DEM slope over the cluster's pixels |
+| τg | `tau_g` (meloche) | ρ g h sin ψ, slab density ρ and thickness h from the features CSV |
+| h | `slab_thickness` (features) | Failure plane to surface, vertical |
+| S_t | from `sigma_t_mean__jamieson1990`, `slab_density`, `slab_thickness`, `rc_wl` | σt / (3ρg·r_c²/h), see "Slab tensile gate" below |
+| Elevation | none | Mean DEM elevation over the cluster's pixels |
+| Π₁ | `Pi1_elastic` (meloche) | τg / (θ Λ √(1+δ)), with δ = `config.DELTA` = 1, θ the spatial shear-strength gradient (§5, plane fit), Λ the elastic length |
+| r_c | `rc_wl` (meloche) | SNOWPACK critical cut length (code 0606), mean over the WL elements; tie-break only |
 
-Survivors are ranked by Sk38 ascending (most unstable first). The top N (`config.N_TOP_TRIGGERS`, 3 since 2026-10-09) are passed to the BFS release-polygon builder. Each trigger yields one release polygon per `--size-factors` entry (default a single polygon at size_factor 1.0).
+**Filter chain.** The order is fixed; do not reorder it. Counts are the
+default Jan 18 run on the current reference CSVs (§6).
+
+| Stage | Keeps a cluster when | Kind | Jan 18 |
+|---|---|---|---|
+| 0 | it overlaps the start-zone KML and has a features row | spatial | 1608 |
+| 1 | τg ≥ 40 Pa (`MIN_TAU_G`) **and** ψ ≥ `STAUCHWALL_DEG` + 2° (= 31°) **and** Sk38 < 1.0 (`MAX_SK38`) | absolute | 197 |
+| 2 | 0.5 m ≤ h ≤ `max_slab_thickness` (2.0 m), **or h is missing** | absolute | 164 |
+| 2b | **not** S_t < 1 (on by default since 2026-10-27; legacy arrest mode only) | absolute | 164 |
+| 3 | elevation ≥ the 50th percentile of the survivors' elevations | **relative** | 82 |
+| 4 | Π₁ ≥ the median Π₁ of the survivors | **relative** | 41 |
+| rank | lowest Sk38 first, ties by lowest r_c; take the top N | **relative** | 3 |
+
+Why each stage is there:
+1. Stage 1 asks whether a crack can be started and whether it can be loaded.
+   τg is the minimum gravitational driving shear. The slope margin keeps
+   triggers off terrain the BFS would immediately wall in as a Stauchwall.
+   Sk38 is weak-layer shear strength over the gravitational plus skier shear
+   stress on a 38° reference slope. So Sk38 < 1 means a skier on 38° terrain
+   would overload the weak layer.
+2. Stage 2 drops slabs too thin to make more than a D1, and slabs too deep
+   for the control method to reach. The 2.0 m cap is an operational choice
+   (explosives at the basal WL); use 1.5 m for skier scenarios. It binds
+   hard; see below.
+3. Stage 2b drops a slab that would break in tension before its own crack
+   reaches r_c (Schweizer et al. 2014). It runs before the ranking, so the
+   ranking still returns N triggers.
+4. Stage 3 prefers the upper start zone, because lower cells can sit in
+   runout or deposition.
+5. Stage 4 keeps the clusters where propagation is relatively more likely.
+   A low-Sk38 cluster that cannot propagate makes a degenerate release.
+
+**Missing values.**
+- Stage 1: a NaN τg, ψ or Sk38 fails.
+- Stage 2: a missing h passes.
+- Stage 2b: a NaN S_t (any input missing) passes. A features CSV without
+  `sigma_t_mean__jamieson1990` turns the gate off silently, so a WARNING is
+  printed.
+- Stage 4: a NaN Π₁ fails. Π₁ needs h, so clusters let through at stage 2
+  for a missing h are normally dropped here.
+- Ranking: rows with NaN Sk38 are dropped.
+
+**The selection is relative from stage 3 on.** Stages 3 and 4 keep the top
+half of whatever survives, and the ranking keeps N. So if one cluster passes
+stage 2b, the chain returns a trigger. That is why the model predicts a
+release on every no-event day (§8 item 10). Only a stage-2b result of zero
+stops it, as "no candidate trigger clusters" (standalone: exit 1; avachain:
+ValueError). Making stage 3 or 4 absolute would give the model a "no release"
+answer. That threshold cannot be chosen from Jan 18.
+
+**Ranking.** The survivors are ranked by Sk38 ascending (`rank_triggers`).
+The top N go to the BFS: `config.N_TOP_TRIGGERS` = 3 here (since
+2026-10-09), and `n_triggers` = 5 in avachain's Little Professor TOML. Each
+trigger yields one release polygon per `--size-factors` entry (default here: a
+single polygon at size factor 1.0).
+
+**Where avachain differs operationally.** These differences are in
+scenario output, not physics. The filter chain itself is the same:
+- **Weights.** Here every scenario gets weight 1/(N × size factors). avachain
+  weights triggers by inverse Sk38 (`_trigger_weights`, normalised 1/Sk38).
+  It weights size factors log-normally around the median
+  ([0.70, 0.85, 1.00, 1.15, 1.30]), and depth percentiles P50 0.6 against
+  P10/P90 0.2. The scenario weight is the product of the three. Event scoring
+  (`event_scoring.py`) sums these weights per pixel.
+- **Dead triggers.** avachain test-builds each ranked trigger at the median
+  size factor. It drops any trigger whose BFS returns no polygon, and does
+  not refill the slot. If every trigger fails, it keeps them all with the
+  rectangle fallback.
+- **Validation mode.** `--restrict-to-release-area` keeps only clusters
+  overlapping the observed release and raises stage 3 to the 75th
+  percentile. `--use-observed-release` skips propagation and uses the
+  observed polygon. Neither runs operationally.
+- **Snapshot.** avachain's `analyze` reads the snapshot at 00:00. The
+  reference CSVs here are 12:00. Rankings can differ near ties.
 
 **Tie-break (since 2026-10-20, `rank_triggers`).** SNOWPACK reports Sk38 to two decimals, so the top-N cut regularly falls inside a tie (item 5 in §8). Ties used to go by CSV row order. They are now broken by `rc_wl`, the critical cut length (SNOWPACK code 0606, Richter et al. 2019) averaged over the same WL elements; lower r_c means more propagation-prone. Sk38 still decides every place it separates. Clusters with no r_c sort after those with one, and full ties keep row order. This required reading r_c from xsnow's `rc_flat` (86043d0); before that, `rc_wl` was NaN for every cluster.
 
@@ -1522,6 +1605,7 @@ sections above; these are what remain open.
 - Sigrist, C., & Schweizer, J. (2007). Critical energy release rates of weak snowpack layers determined in field experiments. *Geophysical Research Letters*, 34, L03502. https://doi.org/10.1029/2006GL028576 — with van Herwijnen (2016) above, cited in `arrest_indices.py` as literature that measures weak-layer energy release rates rather than slab K_Ic (§4e/f caveat); both were previously missing from this list.
 - Schweizer, J., Michot, G., & Kirchner, H. O. K. (2004). On the fracture toughness of snow. *Annals of Glaciology*, 38, 1–8. https://doi.org/10.3189/172756404781814906 — source of the default K_Ic(ρ), Eq. 8.
 - Kirchner, H. O. K., Michot, G., & Schweizer, J. (2000). Fracture toughness of snow in tension. *Philosophical Magazine A*, 80(5). — the `kirchner2000` lower bound.
+- Jamieson, J. B., & Johnston, C. D. (1998). Refinements to the stability index for skier-triggered dry-slab avalanches. *Annals of Glaciology*, 26, 296–302. — the skier stability index Sk38 that ranks triggers (§5).
 - Jamieson, J. B., & Johnston, C. D. (1990). In-situ tensile tests of snowpack layers. *Journal of Glaciology*, 36(122), 102–106. — basis for the facet tensile knockdown `FACET_STRENGTH_FACTOR`, the grain-class grouping of `FACET_SOURCE = 'grain_class'` (group II), and σt = 79.7 (ρ/917)^2.39 kPa in `sigma_t_mean__jamieson1990`.
 - Schweizer, J., Reuter, B., van Herwijnen, A., Gauthier, D., & Jamieson, B. (2014). On how the tensile strength of the slab affects crack propagation propensity. *Proc. ISSW 2014*, Banff. — Eq. 1, the cantilever stress 3ρg r_c²/h behind the slab tensile gate S_t.
 - Reuter, B., & Schweizer, J. (2018). Describing snow instability by failure initiation, crack propagation, and slab tensile support. *Geophysical Research Letters*, 45, 7019–7027. — the finite-element successor to the 2014 closed form; not implemented.
