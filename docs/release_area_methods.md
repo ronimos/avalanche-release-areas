@@ -566,15 +566,31 @@ sublayer and τp cascades into θ, τp* and the trigger ranking.
 
 **(c) Per-layer tensile strength and facetedness.** Each element gets
 σt,i = σt,RG(ρ_i)·(1 − a f_i) (`layer_tensile_strength`), where σt,RG is the
-project σt(ρ) above and f ∈ [0,1] is a facetedness index,
-f = 1 − sphericity for non-dendritic layers and 0 otherwise (`facetedness`).
-The knockdown a = `FACET_STRENGTH_FACTOR` = 0.5 encodes the observation that
-faceted snow is roughly half as strong in tension as rounded snow at equal
-density (Jamieson & Johnston 1990). Using a continuous f rather than a grain-type
-switch means neighbouring cells cannot step discontinuously across a grain-class
-boundary. Our rounded-grain layers sit at sphericity ≈ 0.86, so they still carry
-f ≈ 0.14 and lose ~7% of σt; `FACET_SP_REF` (default `None`) optionally anchors
-f so that typical RG keeps the unmodified σt,RG(ρ).
+project σt(ρ) above and f ∈ [0,1] is a facetedness index. The knockdown
+a = `FACET_STRENGTH_FACTOR` = 0.5 encodes the observation that faceted snow is
+roughly half as strong in tension as rounded snow at equal density (Jamieson &
+Johnston 1990).
+
+f comes from `config.FACET_SOURCE`:
+
+| `FACET_SOURCE` | f = 1 when | Notes |
+|---|---|---|
+| `'grain_class'` (default since 2026-10-27) | primary class FC, DH or FCxr; or primary PP/DF/RG with a faceted secondary (e.g. SNOWPACK code 341) | J&J 1990's group II is "layers of faceted grains and of layers of grains which showed both faceting and rounding", so mixed forms count (`facetedness_grain_class`) |
+| `'grain_class_primary'` | primary class FC, DH or FCxr only | drops the mixed-form rule |
+| `'sphericity'` | f = 1 − sphericity for non-dendritic layers, 0 otherwise | every CSV before 2026-10-27 |
+
+f is 0 otherwise. SNOWPACK grain codes are 100·F1 + 10·F2 + marker.
+
+Why grain class: J&J's knockdown is a grain-class result, and sphericity put
+rounded layers at f ≈ 0.14 (RG sits near sphericity 0.86) and many FCxr layers
+near 0.5. The Jan 18 start-zone median f moves from 0.45 to 0.97. The choice
+moves `sigma_t_mean`, `sigma_t_wl`, the ligament σt, their `A_ca_*`, the energy
+mode and the slab tensile gate. It does **not** move `A_ca_brittle` or the
+legacy Eq. 20, which read the plain σt(ρ) with no knockdown. A step in f across
+a grain-class boundary is now possible between neighbouring cells. That is the
+cost of following the published grouping.
+
+`FACET_SP_REF` (default `None`) only applies to `'sphericity'`.
 
 **(d) Slab-scale aggregation.** Two reductions, both over the slab elements:
 
@@ -908,6 +924,7 @@ Candidate trigger locations are selected by a four-stage filter applied to all s
 |---|---|---|
 | 1 | τg ≥ 40 Pa; slope ≥ (stauchwall_deg + 2°); Sk38 < 1.0 | Minimum gravitational driving stress, terrain steep enough to sustain crack propagation, and unstable stability index |
 | 2 | 0.5 m ≤ h ≤ max_slab_thickness (default 2.0 m, sized for explosive control; 1.5 m for skier scenarios), **or h is NaN** | Exclude implausibly thin slabs and slabs too deep for the control method to trigger. Clusters with no measured slab thickness are *kept*, not rejected |
+| 2b | S_t ≥ 1 (slab tensile gate, on by default since 2026-10-27) | A slab that breaks in tension before its own crack reaches r_c cannot start a release. Applied before the ranking so it still yields N triggers |
 | 3 | Elevation ≥ P50 of remaining candidates | Prefer upper start-zone cells — lower cells may be in runout or deposition |
 | 4 | Π₁ ≥ median of candidates (propagation gate) | Π₁ = τg / (θ Λ √(1+δ)); retain clusters where the dimensionless driving ratio exceeds the group median, i.e., where propagation is relatively more likely |
 
@@ -941,7 +958,8 @@ propagation, in evaluation order:
 | Upslope distance | A_ca × size_factor | per trigger |
 | Downslope distance | trigger → stauchwall distance | per trigger |
 | Lateral distance | `estimate_cross_slope_width` (Gaume θ ratio), floor 15 m | per trigger |
-| Slope below stauchwall (non-upslope only) | `STAUCHWALL_DEG` | 28° |
+| Slope below stauchwall (non-upslope only) | `STAUCHWALL_DEG`, tested on each cluster's **mean** slope | 29° (28° before 2026-10-27) |
+| Slab tensile failure (S_t < 1) | `USE_SLAB_TENSILE_GATE`, `SLAB_TENSILE_SIGMA_COL` | on since 2026-10-27 |
 | Absolute driving-stress floor | `TAU_G_ABS_FLOOR` | **350 Pa** |
 | Thin slab | `MIN_PROPAGATION_SLAB` | 0.50 m |
 | Compliant slab | `MIN_PROPAGATION_LAMBDA` | 0.1 m |
@@ -1014,6 +1032,75 @@ tuning to the event.
 **Mode III.** No cross-slope (mode III) arrest multiplier is applied. Lateral
 extent comes only from `estimate_cross_slope_width`, which scales A_ca by
 θ_downslope / θ_crossslope capped at `GAUME_ASPECT_CAP` = 2.5.
+
+### Slab tensile gate (`USE_SLAB_TENSILE_GATE`, on since 2026-10-27)
+
+A cluster is arrested, and a trigger rejected, when its slab would break in
+tension before the weak-layer crack under it reaches critical length:
+
+S_t = σt / (3 ρ g r_c² / h) < 1
+
+This is the closed form of Schweizer et al. (2014, ISSW, Eq. 1), not Reuter &
+Schweizer's (2018) finite-element index. The inputs are:
+- σt = `sigma_t_mean__jamieson1990`: Jamieson & Johnston (1990),
+  79.7 (ρ/917)^2.39 kPa per layer, with the facet knockdown of §4(c),
+  thickness-averaged over the slab. This is the strength relation the 2014
+  paper uses.
+- r_c = `rc_wl`: SNOWPACK's critical cut length (code 0606) over the WL.
+- ρ and h: slab density and thickness.
+
+The threshold is 1, from the paper, not a fit. A CSV without
+`sigma_t_mean__jamieson1990` makes the gate a silent no-op, so
+`generate_scenarios` warns when that happens.
+
+**Evidence, avachain, 2026-10-26/27 (Jan 18, survey polygon).** Not used to
+pick anything:
+- **Null control.** S_t's arrests were compared against random arrests of the
+  same count, both iid and spatially smooth patches. S_t beat every random set,
+  with sphericity f and with grain-class f.
+- **Triggers it lets through.** Over 175 triggers (5 operational, 20 sampled
+  inside the release, 150 random in the start zone), with grain-class σt, every
+  per-trigger IoU loss is a trigger it rejects. It rejects 55 of the 104
+  triggers outside the release and 1 of the 71 inside.
+- **Event-level score** (scenario weights summed per pixel, Stauchwall 29°):
+  Brier skill 0.16 → 0.24 and AUC 0.74 → 0.83. Mean probability outside the
+  release drops 0.20 → 0.11; inside it is unchanged.
+- **No-event days** (ten dates between 29 Jan and 26 Mar, no avalanche): it
+  rejects no trigger and trims the predicted area by 1–15%. It does not stop
+  false alarms; see §8.
+
+**After the 2026-10-27 forcing rebuild.** The numbers above come from the
+earlier forcing, which carried 21 false avalanche corrections. On the
+rebuilt forcing, Jan 18 scores Brier skill −0.09 → −0.07, AUC 0.61 → 0.68 and
+E[IoU] 0.19 → 0.20 (gate off → on). The gate still removes false area: the
+expected area outside the release drops from 1 273 to 965 m², and the expected
+area inside stays at 1 452 m². Both scores fell because the trigger set
+changed, not the arrest. Removing the false corrections thickened the slab at
+clusters 37 and 1387 by about 0.3 m. Their Sk38 dropped from 0.95 and 0.90 to
+0.81, and they displaced 1773, 3020 and 3126 (Sk38 0.85–0.88), whose polygons
+covered much of the release. That is the Sk38 ranking's sensitivity (§8
+item 3), not evidence about the gate.
+
+**Caveat.** Where S_t = 1 falls depends on how r_c is scaled. SNOWPACK's r_c is
+a flat-field estimate, and a factor-of-two change in r_c moves S_t by four.
+Treat the gate as a physically motivated cut whose position is uncertain.
+
+### Stauchwall (`STAUCHWALL_DEG` = 29° since 2026-10-27)
+
+Downslope growth stops at a cluster whose **mean** slope is below
+`STAUCHWALL_DEG`. Trigger selection also needs slope ≥ `STAUCHWALL_DEG` + 2°.
+29° is Ron's choice of the middle of the 28–30° range in use, not a fit.
+
+The test is per cluster, so polygons jump rather than shrink as the angle
+changes. On Jan 18, 21.6% of the start zone lies between 28° and 30°, and a
+single cluster just under the angle can wall in a trigger: trigger 3126 drops
+from 9 433 to 680 m² between 28° and 29°. Median gate-on area over the five
+operational triggers is 7 382 / 4 580 / 827 m² at 28 / 29 / 30°. At 30° the Π₁
+median (§5, stage 4) also drops from 44.3 to 38.9, which admits different
+triggers.
+
+A pixel-fraction test or an edge-only clip would remove the jumps. The
+per-cluster mean-slope test is kept (Ron, 2026-10-27).
 
 ---
 
@@ -1360,6 +1447,29 @@ sections above; these are what remain open.
    agreement that was offered as one further, independent check does not
    currently hold and needs the full 2×2 re-run under current defaults before
    it can be cited again — see §6 "The 2×2" caveat.
+10. **The model cannot say "nothing releases today".** Measured in avachain
+    on 2026-10-27 on ten dates with no avalanche (29 Jan, 5/12/19/26 Feb,
+    5/7/12/19/26 Mar; Ron: Jan 18 is the only avalanche of the season).
+    - Every date gives a release: five triggers and 1 850–4 680 m² expected
+      area with the gate on. The median is 3 350 m², against 5 810 m²
+      observed on Jan 18.
+    - Rerun on the 2026-10-27 rebuilt forcing, it is the same: every date
+      gives five triggers, with 940–5 890 m² expected area with the gate on
+      (median 2 820 m²; 2 820 m² with it off). Across the ten dates the gate
+      rejects one trigger candidate (29 Jan, 164 → 163).
+    - The absolute filters (Sk38 < 1, slope, slab thickness) pass 56–183
+      clusters on every date (47–194 on the rebuilt forcing).
+    - The elevation and Π₁ stages then each keep the top half of whatever is
+      left, so some triggers always survive.
+    - The slab tensile gate rejects none of them. The model has no
+      P(release), only P(where | release).
+
+    An absolute propagation threshold in place of the relative Π₁ median, or a
+    stability measure evaluated at each cluster's own slope, would give the
+    model a way to return no trigger. Neither can be chosen from Jan 18.
+    Scoring is in avachain's `event_scoring.py`: scenario weights summed per
+    pixel give P(pixel in release | release), scored by Brier and AUC on event
+    days and by predicted area on no-event days.
 
 ## 9. References
 
@@ -1379,7 +1489,9 @@ sections above; these are what remain open.
 - Sigrist, C., & Schweizer, J. (2007). Critical energy release rates of weak snowpack layers determined in field experiments. *Geophysical Research Letters*, 34, L03502. https://doi.org/10.1029/2006GL028576 — with van Herwijnen (2016) above, cited in `arrest_indices.py` as literature that measures weak-layer energy release rates rather than slab K_Ic (§4e/f caveat); both were previously missing from this list.
 - Schweizer, J., Michot, G., & Kirchner, H. O. K. (2004). On the fracture toughness of snow. *Annals of Glaciology*, 38, 1–8. https://doi.org/10.3189/172756404781814906 — source of the default K_Ic(ρ), Eq. 8.
 - Kirchner, H. O. K., Michot, G., & Schweizer, J. (2000). Fracture toughness of snow in tension. *Philosophical Magazine A*, 80(5). — the `kirchner2000` lower bound.
-- Jamieson, J. B., & Johnston, C. D. (1990). In-situ tensile tests of snowpack layers. *Journal of Glaciology*, 36(122), 102–106. — basis for the facet tensile knockdown `FACET_STRENGTH_FACTOR`.
+- Jamieson, J. B., & Johnston, C. D. (1990). In-situ tensile tests of snowpack layers. *Journal of Glaciology*, 36(122), 102–106. — basis for the facet tensile knockdown `FACET_STRENGTH_FACTOR`, the grain-class grouping of `FACET_SOURCE = 'grain_class'` (group II), and σt = 79.7 (ρ/917)^2.39 kPa in `sigma_t_mean__jamieson1990`.
+- Schweizer, J., Reuter, B., van Herwijnen, A., Gauthier, D., & Jamieson, B. (2014). On how the tensile strength of the slab affects crack propagation propensity. *Proc. ISSW 2014*, Banff. — Eq. 1, the cantilever stress 3ρg r_c²/h behind the slab tensile gate S_t.
+- Reuter, B., & Schweizer, J. (2018). Describing snow instability by failure initiation, crack propagation, and slab tensile support. *Geophysical Research Letters*, 45, 7019–7027. — the finite-element successor to the 2014 closed form; not implemented.
 - Reiweger, I., Schweizer, J., Ernst, J. D., & Dual, J. (2010). Load-controlled test apparatus for snow. *Cold Regions Science and Technology*, 62, 119–125. — candidate source for `config.G_WL` = 0.2 MPa; Meloche et al. (2025) Table 1 / p.7 reportedly attribute that value to cold-lab shear tests by "Reiweger et al. (2010)," and this is the best-matching candidate (multi-author, shear-apparatus paper) among that year's Reiweger publications, but **the attribution is not independently confirmed** — see §4 and §6. Verify against the published Meloche (2025) PDF before citing this as settled.
 - El Haddad, M. H., Topper, T. H., & Smith, K. N. (1979). Prediction of non-propagating cracks. *Engineering Fracture Mechanics*, 11(3), 573–584. — the short-crack correction and intrinsic flaw size a₀.
 - Tada, H., Paris, P. C., & Irwin, G. R. (2000). *The Stress Analysis of Cracks Handbook* (3rd ed.). ASME. — single-edge-notch tension F(a/h) and the Feddersen secant form.
