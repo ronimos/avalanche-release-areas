@@ -1164,6 +1164,11 @@ clusters 37 and 1387 by about 0.3 m. Their Sk38 dropped from 0.95 and 0.90 to
 covered much of the release. That is the Sk38 ranking's sensitivity (§8
 item 3), not evidence about the gate.
 
+**After the 2026-10-28 survey-scour rebuild.** Jan 18 scores are identical to
+the 10-27 rebuild with the gate on and off: the scour happens at the event,
+after the 00:00 snapshot that is scored. On the ten no-event days the gate
+rejects one candidate (19 Feb) and trims the expected area by 0–16%.
+
 **Caveat.** Where S_t = 1 falls depends on how r_c is scaled. SNOWPACK's r_c is
 a flat-field estimate, and a factor-of-two change in r_c moves S_t by four.
 Treat the gate as a physically motivated cut whose position is uncertain.
@@ -1573,8 +1578,18 @@ sections above; these are what remain open.
       gives five triggers, with 940–5 890 m² expected area with the gate on
       (median 2 820 m²; 2 820 m² with it off). Across the ten dates the gate
       rejects one trigger candidate (29 Jan, 164 → 163).
+    - Rerun again on 2026-10-28 after the reinit scour was corrected to come
+      from the post-event survey (avachain 8275f4d; 409 of 411 scoured
+      clusters keep a median 0.53 m of snow instead of 0.08 m), it is still
+      the same: every date gives five triggers, with 2 060–4 680 m² expected
+      area with the gate on (median 3 110 m²; 3 330 m² with it off). The
+      triggers differ from the 10-27 run on every date, because the
+      post-event snowpack changed and the Sk38 ranking follows it (item 3).
+      The gate rejects one candidate (19 Feb, 60 → 59). Jan 18 itself is
+      unchanged, because it is analysed before the scour.
     - The absolute filters (Sk38 < 1, slope, slab thickness) pass 56–183
-      clusters on every date (47–194 on the rebuilt forcing).
+      clusters on every date (47–194 on the rebuilt forcing, 51–138 with the
+      survey scour).
     - The elevation and Π₁ stages then each keep the top half of whatever is
       left, so some triggers always survive.
     - The slab tensile gate rejects none of them. The model has no

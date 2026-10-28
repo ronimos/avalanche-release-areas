@@ -8,7 +8,7 @@ Outputs: release polygons, scenario summaries, comparison figures.
 
 No SNOWPACK, no zarr, no NWP pipeline — just this package and its data.
 
-## Current state (2026-10-27) — read this before the older sections
+## Current state (2026-10-28) — read this before the older sections
 
 Older sections below keep their dated numbers as history. Where they disagree
 with this block, this block wins.
@@ -43,7 +43,11 @@ with this block, this block wins.
   predicts a release on every no-event day (methods §8 item 10). On the
   rebuilt forcing that holds for all ten dates: five triggers each, with
   940–5 890 m² expected area (median 2 820 m²). The gate rejects one
-  candidate across all ten. Trigger
+  candidate across all ten. After the 2026-10-28 rebuild with the reinit
+  scour taken from the post-event survey (avachain 8275f4d), Jan 18 scores
+  are identical (it is analysed before the scour) and the no-event days
+  still all release: 2 060–4 680 m² (median 3 110 m²), new triggers on
+  every date, one candidate rejected by the gate. Trigger
   selection is relative, so it never returns "no release". That is open
   and is Ron's decision.
 - **Env trap:** never `uv run --active` here from an avachain shell; it syncs
@@ -115,7 +119,7 @@ python -m release_areas.generate_scenarios \
     --out-dir       outputs/little_prof
 ```
 
-Expected output: see **Current state (2026-10-27)** above. The block that
+Expected output: see **Current state (2026-10-28)** above. The block that
 used to be here (verified 2026-10-09: triggers 2859/5656/6191, best IoU
 0.693) describes the pre-rebuild CSVs, the 28° Stauchwall and the gate off,
 and does not reproduce any more.
