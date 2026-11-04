@@ -122,6 +122,38 @@ def load_kml_mask(kml_path: Path, dem_shape, transform,
     return mask
 
 
+# kg/m^3 — release density when no cluster inside the polygon has a slab
+# density (avachain's DEFAULT_SLAB_DENSITY / _STD).
+DEFAULT_SLAB_DENSITY = 280.0
+DEFAULT_SLAB_DENSITY_STD = 20.0
+
+
+def polygon_density(poly, cluster_map: np.ndarray, features_df: pd.DataFrame,
+                    transform) -> tuple[float, float]:
+    """(mean, std) slab density of the clusters inside a release polygon.
+
+    Median and spread of slab_density over the clusters the polygon covers,
+    the density of the slab that actually releases. Ported from avachain
+    (analysis_pipeline._polygon_density, 2026-11-04), one of the behaviours
+    where avachain is deliberately better: this script used the trigger
+    cluster's density for every scenario of that trigger (fallback 250).
+    Falls back to DEFAULT_SLAB_DENSITY(_STD) when no covered cluster has a
+    density; std falls back when fewer than two do.
+    """
+    import rasterio.features
+    mask = rasterio.features.geometry_mask(
+        [poly.__geo_interface__], out_shape=cluster_map.shape,
+        transform=transform, invert=True)
+    cids = [int(c) for c in np.unique(cluster_map[mask]) if c > 0]
+    if 'slab_density' not in features_df.columns:
+        return DEFAULT_SLAB_DENSITY, DEFAULT_SLAB_DENSITY_STD
+    rho = pd.to_numeric(features_df['slab_density'], errors='coerce').reindex(cids).dropna()
+    if rho.empty:
+        return DEFAULT_SLAB_DENSITY, DEFAULT_SLAB_DENSITY_STD
+    std = float(rho.std()) if len(rho) > 1 else DEFAULT_SLAB_DENSITY_STD
+    return float(rho.median()), std
+
+
 def frac_outside_mask(poly, mask: np.ndarray, transform) -> float:
     """Share of the polygon's 1 m pixels outside the start-zone mask (NaN if no polygon)."""
     import rasterio.features
@@ -389,17 +421,6 @@ def main():
         else:
             trig_cents.append(None)
 
-        # Density for this trigger (used by write_scenario for params.json / density.json)
-        dens_col = 'slab_density'
-        if trig_id in features_df.index and dens_col in features_df.columns:
-            d_series = pd.to_numeric(features_df[dens_col], errors='coerce')
-            density_mean = float(d_series.loc[trig_id]) if not pd.isna(d_series.get(trig_id)) else float(d_series.median())
-            density_std  = float(d_series.dropna().std()) if d_series.dropna().size > 1 else 0.0
-        else:
-            density_mean, density_std = 250.0, 0.0
-        if not np.isfinite(density_mean):
-            density_mean = 250.0
-
         best = {'iou': -1.0, 'poly': None, 'sf': None}
 
         for sf in args.size_factors:
@@ -434,6 +455,10 @@ def main():
                 # volume describe the release area, not the whole domain.
                 scenario_depth = rasterize_release_polygon(
                     poly, depth_raster, dem.shape, transform)
+                # Density of the slab that releases: the clusters this
+                # polygon covers, not the trigger cluster alone.
+                density_mean, density_std = polygon_density(
+                    poly, cluster_map, features_df, transform)
                 row = write_scenario(
                     scenario_dir       = out_dir / 'scenarios',
                     scenario_id        = sid,
