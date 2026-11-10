@@ -716,18 +716,18 @@ def propagate_crack(
     t_x, t_y = pixel_to_utm(t_row, t_col, transform)
     t_aspect = float(aspect_grid[t_row, t_col])
 
-    d_up = (max(A_ca, 20.0) if A_ca else 50.0) * size_factor
+    d_up = (max(A_ca, config.D_UP_MIN_M) if A_ca else config.D_CAP_DEFAULT_M) * size_factor
 
     sw_row, sw_col = find_stauchwall(
         t_row, t_col, slope_grid, aspect_grid, threshold_deg=stauchwall_deg)
     sw_x, sw_y = pixel_to_utm(sw_row, sw_col, transform)
-    d_down = max(float(np.hypot(sw_x - t_x, sw_y - t_y)), 20.0) * size_factor
+    d_down = max(float(np.hypot(sw_x - t_x, sw_y - t_y)), config.D_DOWN_MIN_M) * size_factor
 
     print(f"    distance caps: up={d_up:.0f}m  down={d_down:.0f}m")
 
     neighbours, centroids = _cluster_graph(pixel_index, transform, k_neighbours)
 
-    A_ca_base = A_ca if A_ca else 50.0
+    A_ca_base = A_ca if A_ca else config.D_CAP_DEFAULT_M
     d_lat_gaume = estimate_cross_slope_width(
         trigger_cluster_id, A_ca_base,
         meloche_df, cluster_map, transform,
@@ -744,13 +744,13 @@ def propagate_crack(
     if mode3_ratio is not None:
         d_lat_speed = A_ca_base * mode3_ratio * size_factor
         d_lat = min(d_lat, d_lat_speed)
-        print(f"    d_lat={max(d_lat, 15.0):.0f}m  "
+        print(f"    d_lat={max(d_lat, config.D_LAT_MIN_M):.0f}m  "
               f"(gaume={d_lat_gaume:.0f}m, mode3_speed_cap={d_lat_speed:.0f}m "
               f"@ ratio {mode3_ratio:.3f})")
     else:
-        print(f"    d_lat={max(d_lat, 15.0):.0f}m  (gaume only, "
+        print(f"    d_lat={max(d_lat, config.D_LAT_MIN_M):.0f}m  (gaume only, "
               f"mode III speed cap off)")
-    d_lat = max(d_lat, 15.0)
+    d_lat = max(d_lat, config.D_LAT_MIN_M)
     if not config.USE_DISTANCE_CAPS:
         d_up = d_down = d_lat = np.inf
         print("    distance caps OFF (config.USE_DISTANCE_CAPS)")

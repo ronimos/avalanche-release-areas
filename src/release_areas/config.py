@@ -179,6 +179,14 @@ STAUCHWALL_DEG        = 29.0   # slope threshold for downslope arrest; Ron 2026-
 GAUME_ASPECT_CAP      = 2.5    # max cross-slope width / A_ca
 MIN_POLYGON_AREA      = 200.0  # m²; discard smaller polygons
 TAU_G_ABS_FLOOR       = 350.0  # Pa; absolute driving-stress floor
+# Distance caps (used only while USE_DISTANCE_CAPS): d_up = max(A_ca,
+# D_UP_MIN_M) (D_CAP_DEFAULT_M without an A_ca), d_down = max(Stauchwall
+# distance, D_DOWN_MIN_M), d_lat = max(Gaume width, D_LAT_MIN_M). Were literals
+# in propagate_crack until 2026-11-10 (same values as ~/avachain).
+D_UP_MIN_M      = 20.0   # m
+D_DOWN_MIN_M    = 20.0   # m
+D_LAT_MIN_M     = 15.0   # m
+D_CAP_DEFAULT_M = 50.0   # m
 MIN_PROPAGATION_SLAB  = 0.50   # m; thin-slab arrest threshold
 MIN_PROPAGATION_LAMBDA = 0.1   # m; compliant-slab arrest threshold
 # Λ continuity thresholds, along-slope (mode II: upslope + downslope).
