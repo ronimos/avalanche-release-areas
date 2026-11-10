@@ -1187,6 +1187,16 @@ rejects one candidate (19 Feb) and trims the expected area by 0–16%.
 a flat-field estimate, and a factor-of-two change in r_c moves S_t by four.
 Treat the gate as a physically motivated cut whose position is uncertain.
 
+**r_c = 0.** SNOWPACK reports r_c = 0 where the slab's own weight overloads the
+weak layer and no cut is needed. On the 2025-26 Little Professor CSVs every
+such cluster has τg > τp, and they are the deep slabs (97–100% of clusters with
+h > 3 m; 14 of 1608 on Jan 18, ~300 from late February). The load then goes to
+0 and S_t to infinity, which is the right limit but was a divide by zero.
+Since 2026-11-10 `slab_tensile_support` floors r_c at `RC_MIN_M` = 1 mm. Over
+11 dates × 1608 clusters, at the trigger (toughness-capped σt) and in the BFS
+(plain σt), no gate outcome changed. The floored S_t is ≥ 5 × 10⁵. A NaN r_c
+stays NaN, so the gate does not fire without data.
+
 ### Trigger fracture toughness (`USE_TRIGGER_TOUGHNESS`, on since 2026-11-10)
 
 At the **trigger only**, σt in S_t is capped by the strength of a slab with an
