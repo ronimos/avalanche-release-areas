@@ -1516,9 +1516,36 @@ A further caution: at three triggers the cut falls *inside* a three-way Sk38
 tie at 0.72, so the selection is decided by tie ordering rather than by any
 margin — see §8 item 5.
 
-![Release zone scenarios vs observed crown, Jan 18 2026. Red: observed crown. Coloured outlines: three modelled scenarios. Stars mark trigger cluster centroids. Stats box shows area ratio and best IoU.](figures/release_comparison_20260118.png)
+![Release zone scenarios vs observed crown, Jan 18 2026, standalone defaults. Red: the 6 934 m² mapped crown. Coloured outlines: three modelled scenarios. Stars mark trigger cluster centroids.](figures/release_comparison_20260118.png)
 
-*BFS scenario polygons vs observed Jan 18 2026 crown on 1 m hillshade (EPSG:6342). Start zone boundary in green. Regenerated 2026-10-18 from the reference CSVs with the current defaults (`--max-clusters` and `--mode3-speed-cap` both left at their shipped values — see the table above) and the default three triggers; none of the three polygons is cap-bound. Plotted equal-aspect; before a 2026-10-09 fix the axes were `aspect='auto'`, which stretched east against north by 1.21× and made every bearing read off the figure wrong by −4.6°.*
+*Standalone, shipped defaults, regenerated 2026-11-10 with the command below:
+the reference CSVs of the 2026-10-27 rebuild, three triggers, and every
+11-10 change at its default. That means trigger toughness on, slab-crack
+lines on, distance caps **on**, `TAU_RATIO_FLOOR` = 0 and facet knockdown
+a = 0.5. Triggers 1772 / 4300 / 2375, areas 612 / 1 576 / 1 268 m², best IoU
+0.093. The red outline is the 6 934 m² mapped crown that ships in this repo's
+`data/`, not the 5 810 m² survey polygon avachain scores against. This
+default run is **uncalibrated** and is not avachain's operational
+configuration. The numbers in the table above predate the 2026-10-27 forcing
+rebuild and the 11-10 changes, and do not reproduce any more. The previous
+version of this figure (2026-10-18, triggers 2859/5656/6191) is in git
+history.*
+
+![Jan 18 2026 in avachain, calibration 2026-11-10.3: five trigger polygons against the 5 810 m² survey polygon](figures/release_comparison_20260118_avachain_cal3.png)
+
+*The same day in avachain, which runs this model with the Little Professor
+calibration 2026-11-10.3:
+- facet knockdown a = 0.75;
+- distance caps off;
+- τg/τp floor 0.65;
+- trigger toughness and slab-crack lines on.
+
+It uses feature CSVs regenerated on 11-10, five triggers, and the survey
+polygon (red, 5 810 m²). Expected IoU 0.610, expected area 6 831 m², AUC 0.848, and
+0 of the 46 points skied without triggering release. **A fit, not validation**: every number was a
+calibration target (avachain `docs/release_area_geometry.md` §6–7). The two
+figures differ in calibration, feature CSVs, trigger count and target
+polygon, not in code.*
 
 To reproduce:
 
