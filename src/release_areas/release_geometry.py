@@ -829,6 +829,11 @@ def propagate_crack(
         tau_g_nbr = nbr_props.get('tau_g', np.nan)
         if not np.isnan(tau_g_nbr) and tau_g_nbr < TAU_G_ABS_FLOOR:
             return False, 'tau_g_below_floor'
+        if config.TAU_RATIO_FLOOR > 0:
+            tau_p_nbr = nbr_props.get('wl_shear_strength', np.nan)
+            if (np.isfinite(tau_g_nbr) and np.isfinite(tau_p_nbr) and tau_p_nbr > 0
+                    and tau_g_nbr / tau_p_nbr < config.TAU_RATIO_FLOOR):
+                return False, 'tau_ratio_below_floor'
 
         h_nbr = nbr_props.get('slab_thickness', np.nan)
         if not np.isnan(h_nbr) and h_nbr < MIN_PROPAGATION_SLAB:

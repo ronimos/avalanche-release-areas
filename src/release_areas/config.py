@@ -187,6 +187,10 @@ D_UP_MIN_M      = 20.0   # m
 D_DOWN_MIN_M    = 20.0   # m
 D_LAT_MIN_M     = 15.0   # m
 D_CAP_DEFAULT_M = 50.0   # m
+# Load-to-strength floor (Ron, 2026-11-10; same as ~/avachain; 0 = off):
+# arrest a cluster whose tau_g / wl_shear_strength is below it. Dimensionless,
+# unlike TAU_G_ABS_FLOOR. avachain sets it per slope via [calibration].
+TAU_RATIO_FLOOR       = 0.0
 MIN_PROPAGATION_SLAB  = 0.50   # m; thin-slab arrest threshold
 MIN_PROPAGATION_LAMBDA = 0.1   # m; compliant-slab arrest threshold
 # Λ continuity thresholds, along-slope (mode II: upslope + downslope).

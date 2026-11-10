@@ -52,3 +52,7 @@ def test_defaults_match_avachain():
     assert config.TOUGHNESS_K_COL == 'K_Ic_ligament'
     assert (ai.TOUGHNESS_EDGE_F, ai.TOUGHNESS_A_FRAC) == (1.122, 0.5)
     assert ai.K_IC_RANGE_MODE == 'extrapolate'
+
+
+def test_tau_ratio_floor_default_off():
+    assert config.TAU_RATIO_FLOOR == 0.0
