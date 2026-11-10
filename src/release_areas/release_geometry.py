@@ -42,7 +42,8 @@ import numpy as np
 import pandas as pd
 
 from release_areas import config
-from release_areas.arrest_indices import arrest_length, slab_tensile_support
+from release_areas.arrest_indices import (arrest_length, slab_tensile_support,
+                                          toughness_limited_strength)
 
 # Re-exported for backwards compatibility; config is the source of truth.
 STAUCHWALL_DEG     = config.STAUCHWALL_DEG
@@ -119,10 +120,12 @@ def directional_lambda(props: dict, is_cross: bool) -> float:
 
 
 def cluster_tensile_support(cid, meloche_df, snap_features) -> float:
-    """S_t of one cluster (NaN if an input is missing): r_c from the Meloche
-    CSV, slab density / thickness / sigma_t from the snapshot features, as the
-    BFS gate reads them. The same gate applies to the trigger itself: a slab
-    that breaks before its own crack reaches r_c cannot start a release."""
+    """S_t of a TRIGGER cluster (NaN if an input is missing): r_c from the
+    Meloche CSV, slab density / thickness / sigma_t from the snapshot features.
+    A slab that breaks before its own crack reaches r_c cannot start a
+    release. Every caller is trigger-side (trigger gate, candidate filter);
+    with config.USE_TRIGGER_TOUGHNESS sigma_t is toughness-limited. The BFS
+    per-cluster gate calls arrest_indices.slab_tensile_support directly."""
     def _get(df, col):
         if df is None or df.empty or cid not in df.index or col not in df.columns:
             return np.nan
@@ -130,10 +133,13 @@ def cluster_tensile_support(cid, meloche_df, snap_features) -> float:
             return float(first_scalar(df.loc[cid, col]))
         except (TypeError, ValueError):
             return np.nan
+    sigma_t = _get(snap_features, config.SLAB_TENSILE_SIGMA_COL)
+    h = _get(snap_features, 'slab_thickness')
+    if config.USE_TRIGGER_TOUGHNESS:
+        sigma_t = toughness_limited_strength(
+            sigma_t, _get(snap_features, config.TOUGHNESS_K_COL), h)
     return float(slab_tensile_support(
-        _get(snap_features, config.SLAB_TENSILE_SIGMA_COL),
-        _get(snap_features, 'slab_density'),
-        _get(snap_features, 'slab_thickness'),
+        sigma_t, _get(snap_features, 'slab_density'), h,
         _get(meloche_df, 'rc_wl')))
 
 
@@ -745,6 +751,9 @@ def propagate_crack(
         print(f"    d_lat={max(d_lat, 15.0):.0f}m  (gaume only, "
               f"mode III speed cap off)")
     d_lat = max(d_lat, 15.0)
+    if not config.USE_DISTANCE_CAPS:
+        d_up = d_down = d_lat = np.inf
+        print("    distance caps OFF (config.USE_DISTANCE_CAPS)")
 
     LAMBDA_DROP_FACTOR     = config.LAMBDA_DROP_FACTOR
     LAMBDA_RISE_FACTOR     = config.LAMBDA_RISE_FACTOR

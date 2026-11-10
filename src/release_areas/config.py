@@ -330,6 +330,25 @@ USE_MELOCHE_ARREST = True
 USE_SLAB_TENSILE_GATE  = True
 SLAB_TENSILE_SIGMA_COL = 'sigma_t_mean__jamieson1990'
 
+# Trigger fracture toughness (Ron, 2026-11-10; same as ~/avachain
+# release_geometry; CLI --no-trigger-toughness). At the TRIGGER only, sigma_t in
+# S_t is capped by the slab's edge-crack strength K_Ic / (1.122 sqrt(pi h/2))
+# (arrest_indices.toughness_limited_strength), K_Ic the ligament column
+# (Schweizer 2004, extrapolated past its density range). The BFS per-cluster
+# tensile gate is unchanged. On 2026-11-09 (avachain) it took the Jan 18
+# ski-track non-triggers from 13/46 releasing to 0/46 and left the five Jan 18
+# triggers and IoU unchanged; it does not cut the no-event false alarms. A CSV
+# without TOUGHNESS_K_COL leaves the plain S_t.
+USE_TRIGGER_TOUGHNESS = True
+TOUGHNESS_K_COL       = 'K_Ic_ligament'
+
+# BFS distance caps (up: A_ca, down: Stauchwall distance, cross: Gaume width).
+# Default on, both repos. Off (CLI --no-distance-caps; avachain: a slope's
+# [calibration] distance_caps = false) leaves the release bounded by the
+# per-cluster gates, the start zone and MAX_BFS_CLUSTERS, and the size factors
+# then scale nothing in the BFS.
+USE_DISTANCE_CAPS = True
+
 # -----------------------------------------------------------------------
 # Path-energy arrest (energy_path.py) — hypothesis, see methods §3
 # -----------------------------------------------------------------------

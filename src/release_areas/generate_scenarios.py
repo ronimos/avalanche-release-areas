@@ -218,6 +218,15 @@ def main():
                     help='Legacy mode: also arrest where the slab breaks in tension '
                          'before the crack reaches r_c (Schweizer et al. 2014; '
                          f'default: {config.USE_SLAB_TENSILE_GATE}).')
+    ap.add_argument('--trigger-toughness', action=argparse.BooleanOptionalAction,
+                    default=config.USE_TRIGGER_TOUGHNESS,
+                    help='Cap the trigger slab strength by its edge-crack toughness '
+                         'K_Ic/(1.122 sqrt(pi h/2)) '
+                         f'(default: {config.USE_TRIGGER_TOUGHNESS}).')
+    ap.add_argument('--distance-caps', action=argparse.BooleanOptionalAction,
+                    default=config.USE_DISTANCE_CAPS,
+                    help='BFS up/down/cross distance caps '
+                         f'(default: {config.USE_DISTANCE_CAPS}).')
     ap.add_argument('--delta', type=float, default=config.DELTA,
                     help=f'Meloche softening coefficient for the BFS Eq. 20 test '
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
@@ -240,6 +249,8 @@ def main():
     config.ARREST_MODE = args.arrest_mode
     config.MASK_MODE = args.mask_mode
     config.USE_SLAB_TENSILE_GATE = args.slab_tensile_gate
+    config.USE_TRIGGER_TOUGHNESS = args.trigger_toughness
+    config.USE_DISTANCE_CAPS = args.distance_caps
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)
