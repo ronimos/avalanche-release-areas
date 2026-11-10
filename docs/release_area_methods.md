@@ -11,6 +11,19 @@ Units are SI (Pa, m, kg m⁻³, J m⁻²) with angles in degrees.
 
 Figures marked "JGR" are reproduced from Meloche et al. (2025), *JGR Earth Surface*, open access under CC BY 4.0. Image files are in `figures/`.
 
+## Model flow
+
+![Release-area model flow: features, trigger selection, the crack-propagation BFS with its arrest gates, slab-crack lines and the polygon](figures/release_model_flow.png)
+
+The default chain as of 2026-11-10. Trigger selection is §5 ("Trigger
+cluster selection"). The BFS gates are §5 ("What the BFS actually arrests
+on"), and the slab tensile gate, trigger toughness, τg/τp floor and slab-crack
+lines are their own §5 sections. Two stages are relative: elevation and Π₁
+keep the upper half of the survivors, so the chain returns a trigger on every
+day that passes stage 2b (§8 item 10). Source: `figures/release_model_flow.dot`.
+Re-render with `dot -Tpng -Gdpi=150 docs/figures/release_model_flow.dot -o
+docs/figures/release_model_flow.png` after a change to the chain.
+
 ---
 
 ## 1. Notation
@@ -946,7 +959,7 @@ default Jan 18 run on the current reference CSVs (§6).
 | 0 | it overlaps the start-zone KML and has a features row | spatial | 1608 |
 | 1 | τg ≥ 40 Pa (`MIN_TAU_G`) **and** ψ ≥ `STAUCHWALL_DEG` + 2° (= 31°) **and** Sk38 < 1.0 (`MAX_SK38`) | absolute | 197 |
 | 2 | 0.5 m ≤ h ≤ `max_slab_thickness` (2.0 m), **or h is missing** | absolute | 164 |
-| 2b | **not** S_t < 1 (on by default since 2026-10-27; legacy arrest mode only) | absolute | 164 |
+| 2b | **not** S_t < 1 (on by default since 2026-10-27; legacy arrest mode only); since 2026-11-10 σt here is capped by the trigger toughness K_Ic/(1.122√(πh/2)) | absolute | 164 (before the toughness cap) |
 | 3 | elevation ≥ the 50th percentile of the survivors' elevations | **relative** | 82 |
 | 4 | Π₁ ≥ the median Π₁ of the survivors | **relative** | 41 |
 | rank | lowest Sk38 first, ties by lowest r_c; take the top N | **relative** | 3 |
