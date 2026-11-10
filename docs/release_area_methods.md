@@ -1043,6 +1043,7 @@ propagation, in evaluation order:
 | Lateral distance | `estimate_cross_slope_width` (Gaume θ ratio), floor 15 m | per trigger |
 | Slope below stauchwall (non-upslope only) | `STAUCHWALL_DEG`, tested on each cluster's **mean** slope | 29° (28° before 2026-10-27) |
 | Slab tensile failure (S_t < 1) | `USE_SLAB_TENSILE_GATE`, `SLAB_TENSILE_SIGMA_COL` | on since 2026-10-27 |
+| Load below a fraction of WL strength (τg/τp) | `TAU_RATIO_FLOOR` | 0 = off; avachain's Little Professor calibration sets 0.65 |
 | Absolute driving-stress floor | `TAU_G_ABS_FLOOR` | **350 Pa** |
 | Thin slab | `MIN_PROPAGATION_SLAB` | 0.50 m |
 | Compliant slab | `MIN_PROPAGATION_LAMBDA` | 0.1 m |
@@ -1172,6 +1173,117 @@ rejects one candidate (19 Feb) and trims the expected area by 0–16%.
 **Caveat.** Where S_t = 1 falls depends on how r_c is scaled. SNOWPACK's r_c is
 a flat-field estimate, and a factor-of-two change in r_c moves S_t by four.
 Treat the gate as a physically motivated cut whose position is uncertain.
+
+### Trigger fracture toughness (`USE_TRIGGER_TOUGHNESS`, on since 2026-11-10)
+
+At the **trigger only**, σt in S_t is capped by the strength of a slab with an
+edge crack of depth h/2:
+
+σ_eff = min(σt, K_Ic / (1.122 √(π h/2)))
+
+K_Ic is the `K_Ic_ligament` column (Schweizer et al. 2004, Eq. 8, evaluated past
+its 80–300 kg/m³ range since `K_IC_RANGE_MODE = 'extrapolate'`; the range is a
+guideline, and clamping understated dense slabs by ~25%). The BFS per-cluster
+gate keeps plain σt. On Jan 18 (avachain) the 46 points where people skied
+without triggering went from 13/46 releasing to 0/46; the five triggers and
+IoU did not change. On Jan 18 the cap is below σt at every release cluster,
+so trigger strength is ~1.2 kPa everywhere and is set by K_Ic and h. The flaw
+depth h/2 and the semi-infinite F = 1.122 (a finite-thickness F at a/h = 0.5
+is ~2.8) are assumptions, not measurements.
+
+### Load-to-strength floor (`TAU_RATIO_FLOOR`, default off)
+
+A cluster is arrested where τg / τp < `TAU_RATIO_FLOOR`, τp the weak layer's
+shear strength (`wl_shear_strength`). It is dimensionless, so unlike
+`TAU_G_ABS_FLOOR` it does not encode one snowpack's slab depth. SNOWPACK's τp
+is a function of weak-layer density alone (r = 0.99 with ρ_wl²), so on Jan 18
+the ratio tracks τg (r 0.93) and Sk38 (r −0.9). The default is off; avachain's
+Little Professor calibration (2026-11-10.2) sets 0.65, in the middle of a
+0.60–0.70 IoU plateau. It removes mostly overshoot up to 0.70 and real release
+from 0.75. This is a calibrated value, not a physical constant.
+
+### Running slab cracks (`USE_SLAB_CRACK_LINES`, on since 2026-11-10)
+
+**Mechanism.** A release boundary is a fracture *in the slab*. The slab
+tensile gate above says where the slab first breaks. Once it has broken, that
+crack can run along the slab and become a crown or flank, even through
+clusters whose own S_t is above 1. Two stages, kept separate on purpose (Ron):
+
+1. **Initiation** is the existing per-cluster gate (S_t < 1). A cluster it
+   arrests starts a slab crack, oriented by how the BFS reached it: an
+   upslope step starts a **crown**, which runs cross-slope; a cross-slope step
+   starts a **flank**, which runs along the fall line. A downslope step starts
+   none: the Stauchwall side is in compression.
+2. **Running.** After the BFS, `slab_crack_lines` runs each crack as a line
+   through the admitted region. Each step goes to the single best-aligned
+   neighbour (within 45°, `SLAB_CRACK_ALIGN_COS`), and only while the slab
+   there is loaded. A crown needs detached slab below it within
+   `SLAB_CRACK_BAND_M` (5 m), a flank needs detached slab beside it, and the
+   band-mean slope must exceed the friction angle φ = 27°. The area the lines
+   sever from the trigger (4-connected pixels) is removed. The line clusters
+   stay; they are the boundary.
+
+**Why there is no toughness test.** The running test was first written as
+fracture mechanics: K = F σ √(π a) against the slab's K_Ic (Schweizer 2004 from
+slab density and grain size; flanks in mode II with K_IIc ≈ 0.87 K_Ic, the
+maximum-tangential-stress estimate). The load was the net downslope weight of
+the detached slab sliding on the fractured weak layer, σ ∝ ρ̄h̄ g s (sin θ −
+tan φ cos θ)/h. Two forms were tested on Jan 18:
+
+| Load | span s | crack steps stopped by K < K_c | K/K_c, p10 |
+|---|---|---|---|
+| Full detached weight (crown: length below; flank: half width) | L, W/2 | 0 of 6 160 | 13–20 |
+| Stauchwall- and flank-supported, nearest support carries | min(L, W)/2 | 0 of 2 220 | 10–14 |
+
+This follows from scale, not from the load model. To stop a crack a cluster
+long (a ≈ 3 m), the slab stress must be below K_c/√(πa) ≈ 1.6/3 ≈ 0.5 kPa. A
+detached slab at 38° with φ = 27° exceeds that once its supported span is
+~1.5 m. A slab crack in snow a few metres long is unstable. Toughness can
+only bind at the trigger scale (above). This also fits field observations
+(Bergfeld et al.): the slab breaks in tension a few metres behind the
+weak-layer crack front. So the running test is geometric: a crack runs while
+the slab is loaded. A K_c test would add parameters and change no result.
+
+**Order.** Run *inside* the BFS, a crack could only reach clusters not yet
+admitted, so the result depended on visiting order. On Jan 18, 6 656 line
+neighbours had already been admitted when the crack arrived, more than the
+6 160 that were tested. That version scored IoU 0.614, which was largely an
+artefact of that order. A first post-BFS version let a line continue to every
+neighbour within ±45°; with no binding stop it flooded the region (Jan 18
+polygons fell from ~755 clusters to 1–5). The adopted version runs one
+best-aligned neighbour per step. Lines may cross, and each line stops on its
+own, so the result does not depend on the order of clusters, neighbours or
+cracks (pinned by `tests/test_slab_crack_lines.py`).
+
+**Line clusters kept or removed.** Removing them gave Jan 18 IoU 0.596, area
+5 934 m², AUC 0.862. It took 584 m² of release for 911 m² of overshoot, so the
+line clusters are mostly real release, as a boundary should be. Keeping them
+is adopted.
+
+**Results, avachain, calibration 2026-11-10.2 features** (survey polygon
+5 810 m²; scored by expected IoU over the scenario ensemble; 46 forced ski
+shots with no rectangle fallback):
+
+| Jan 18 | lines off | lines on |
+|---|---|---|
+| IoU | 0.601 | 0.610 |
+| Area | 7 429 m² | 6 831 m² |
+| AUC | 0.801 | 0.848 |
+| Release inside / outside the survey polygon | 4 970 / 2 459 m² | 4 791 / 2 040 m² |
+| Ski points releasing | 0/46 | 0/46 |
+
+The five triggers are unchanged. Per trigger, 30–45 slab cracks start (mostly
+flanks), 95–155 line clusters form, and 18–160 clusters are cut off. On the
+ten no-event days (reported, not scored) nine are unchanged and 19 Mar moves
+9 071 → 9 049 m². There the tensile gate rarely fires at the region's edge,
+so no crack starts. The rule adds no free parameter. `SLAB_CRACK_BAND_M` and
+the 45° step tolerance are geometric choices that were not swept.
+
+**Limits.** Orientation comes from the BFS step into the failed cluster,
+measured against the trigger's fall line, not the local one. The load test
+uses the region already admitted, which assumes the whole region has
+detached. Mode III (the collapse step at the flank) is not represented.
+The gain on Jan 18 is modest (IoU +0.009, AUC +0.05) and comes from one event.
 
 ### Stauchwall (`STAUCHWALL_DEG` = 29° since 2026-10-27)
 

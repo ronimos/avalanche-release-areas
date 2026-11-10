@@ -227,6 +227,11 @@ def main():
                     default=config.USE_DISTANCE_CAPS,
                     help='BFS up/down/cross distance caps '
                          f'(default: {config.USE_DISTANCE_CAPS}).')
+    ap.add_argument('--slab-crack-lines', action=argparse.BooleanOptionalAction,
+                    default=config.USE_SLAB_CRACK_LINES,
+                    help='run slab cracks started by the tensile gate as crown/flank '
+                         'lines and cut off the area they sever '
+                         f'(default: {config.USE_SLAB_CRACK_LINES}).')
     ap.add_argument('--delta', type=float, default=config.DELTA,
                     help=f'Meloche softening coefficient for the BFS Eq. 20 test '
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
@@ -251,6 +256,7 @@ def main():
     config.USE_SLAB_TENSILE_GATE = args.slab_tensile_gate
     config.USE_TRIGGER_TOUGHNESS = args.trigger_toughness
     config.USE_DISTANCE_CAPS = args.distance_caps
+    config.USE_SLAB_CRACK_LINES = args.slab_crack_lines
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)

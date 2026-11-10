@@ -361,6 +361,29 @@ TOUGHNESS_K_COL       = 'K_Ic_ligament'
 # then scale nothing in the BFS.
 USE_DISTANCE_CAPS = True
 
+# Running slab cracks (Ron, 2026-11-10; same as ~/avachain release_geometry;
+# CLI --no-slab-crack-lines).
+# A slab that the per-cluster tensile gate breaks (slab_tensile_failure) starts
+# a crack IN THE SLAB: a crown if the BFS reached it by an upslope step (runs
+# cross-slope), a flank if by a cross-slope step (runs along the fall line);
+# downslope steps start none (Stauchwall, compression). After the BFS each crack
+# runs as a line, one best-aligned neighbour per step (within
+# SLAB_CRACK_ALIGN_COS of the line), while the slab there is loaded: inside the
+# admitted region, with detached slab below a crown / beside a flank within
+# SLAB_CRACK_BAND_M, and the band-mean slope above PHI_DEG. The area the
+# lines sever from the trigger (4-connected pixels) is removed; the line
+# clusters stay (they are the boundary). Order-independent by construction.
+# No fracture toughness in the run test: with any static load of a detached
+# slab (full weight, or Stauchwall- and flank-supported, q*min(L,W)/2), K was
+# 10-75x the slab K_Ic on Jan 18 (0 of 2220 steps stopped), because a crack a
+# few metres long needs < ~0.5 kPa to arrest. Jan 18 in avachain (calibration 2026-11-10.2):
+# IoU 0.601 -> 0.610, area 7429 -> 6831 m2, AUC 0.801 -> 0.848, ski 0/46, same
+# five triggers; 419 m2 overshoot removed for 179 m2 of release; 9/10 no-event
+# days unchanged (the tensile gate never fires there).
+USE_SLAB_CRACK_LINES = True
+SLAB_CRACK_BAND_M    = 5.0     # m; half-width of the strip that sets L and W
+SLAB_CRACK_ALIGN_COS = 0.707   # a line step must lie within 45 deg of the line
+
 # -----------------------------------------------------------------------
 # Path-energy arrest (energy_path.py) — hypothesis, see methods §3
 # -----------------------------------------------------------------------
