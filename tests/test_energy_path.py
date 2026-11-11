@@ -138,3 +138,23 @@ def test_compute_meloche_features_emits_energy_columns_without_theta():
     for col in ('tau_net', 'G_c', 'N_max', 'G_slab_path'):
         assert out[col].notna().all(), col
     assert out['tau_net'].iloc[0] == pytest.approx(tau_net(RHO, H, PSI), rel=1e-3)
+
+
+class TestEnergyDelta:
+    """Energy-mode delta is ENERGY_DELTA = 0 (R was fitted at delta = 0), not the
+    Eq. 20 DELTA = 1.0 it used until 2026-11-11; same as avachain."""
+
+    def test_defaults(self):
+        assert config.ENERGY_DELTA == 0.0
+        assert config.DELTA == 1.0
+
+    def test_cell_energy_uses_energy_delta(self, monkeypatch):
+        g0 = cell_energy(_row(), PSI)['G_c']
+        assert g0 == pytest.approx(cell_energy(_row(), PSI, delta=0.0)['G_c'])
+        monkeypatch.setattr(config, 'ENERGY_DELTA', 1.0)
+        assert cell_energy(_row(), PSI)['G_c'] == pytest.approx(2.0 * g0)
+
+    def test_eq20_delta_does_not_reach_the_energy_mode(self, monkeypatch):
+        g0 = cell_energy(_row(), PSI)['G_c']
+        monkeypatch.setattr(config, 'DELTA', 3.0)
+        assert cell_energy(_row(), PSI)['G_c'] == pytest.approx(g0)

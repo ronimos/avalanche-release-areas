@@ -29,7 +29,7 @@ def tau_net(rho, h, psi_deg, phi_deg=None):
 
 def g_c(tau_p, K_wl, delta=None, tau_r=0.0):
     """Weak-layer fracture energy (tau_p - tau_r)^2 (1 + delta) / (2 K_wl) (J/m2)."""
-    delta = config.DELTA if delta is None else delta
+    delta = config.ENERGY_DELTA if delta is None else delta
     return weak_layer_fracture_energy(tau_p, K_wl, delta, tau_r)
 
 
@@ -65,7 +65,7 @@ def cell_energy(row, psi_deg, sigma_t_col=None, e_relation=None, delta=None,
     """
     sigma_t_col = config.SIGMA_T_COLUMN if sigma_t_col is None else sigma_t_col
     e_relation = config.E_RELATION if e_relation is None else e_relation
-    delta = config.DELTA if delta is None else delta
+    delta = config.ENERGY_DELTA if delta is None else delta
     G_wl = config.G_WL if G_wl is None else G_wl
     use_residual = config.ENERGY_USE_RESIDUAL if use_residual is None else use_residual
 

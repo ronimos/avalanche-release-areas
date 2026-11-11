@@ -37,6 +37,9 @@ with this block, this block wins.
   value as a default argument (that freezes it at import); take `None` and
   resolve inside. avachain's `model_params.py` holds the same values, and its
   `tests/test_model_params.py` compares them with this file.
+- **2026-11-11 (Ron):** the energy arrest mode's G_c uses `ENERGY_DELTA = 0.0`
+  (CLI `--energy-delta`), not the Eq. 20 `DELTA = 1.0` it used before: R = 0.48
+  was fitted at δ = 0. Same as avachain. The legacy (default) mode is unchanged.
 - **Reference CSVs** come from avachain's 2026-10-27 forcing rebuild. That
   rebuild removed 21 false avalanche corrections from the forcing (Ron: Jan 18
   is the only avalanche of the season) and aligned the reinit time.

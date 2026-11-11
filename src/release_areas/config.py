@@ -431,6 +431,11 @@ SLAB_CRACK_ALIGN_COS = 0.707   # a line step must lie within 45 deg of the line
 # -----------------------------------------------------------------------
 # Path-energy arrest (energy_path.py) — hypothesis, see methods §3
 # -----------------------------------------------------------------------
+# Energy-mode delta in G_c = (tau_p - tau_r)^2 (1 + delta) / (2 K_wl), separate
+# from the Eq. 20 DELTA (1.0): R = 0.48 was fitted to the JGR runs at delta = 0,
+# so the R-based test uses 0 (Ron, 2026-11-11; avachain ENERGY_DELTA, same value).
+# It was config.DELTA = 1.0 here until 2026-11-11. CLI --energy-delta.
+ENERGY_DELTA        = 0.0
 ARREST_MODE         = 'legacy'        # BFS arrest rule: 'legacy' (propagate_crack as before) or 'energy' (path energy)
 SIGMA_T_COLUMN      = 'sigma_t_mean'  # thickness-weighted slab σt; 'sigma_t_wl' = weakest-link bound (methods §4)
 ENERGY_USE_RESIDUAL = False           # τr = 0 in G_c, as arrest_indices.evaluate(use_residual=False)

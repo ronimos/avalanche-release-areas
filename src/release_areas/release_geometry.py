@@ -1398,7 +1398,7 @@ def propagate_crack_energy(
     cap_bound = bool(heap) and len(reached) >= max_clusters
     rejected = {n: r for n, (_, r) in offers.items() if n not in best}
     counts = pd.Series(list(rejected.values()), dtype=object).value_counts().to_dict()
-    print(f"  Energy region: {len(reached)} clusters (R={R}, delta={config.DELTA}, "
+    print(f"  Energy region: {len(reached)} clusters (R={R}, delta={config.ENERGY_DELTA}, "
           f"sigma_t={config.SIGMA_T_COLUMN}); boundary rejections {counts}"
           f"{'  [CAP-BOUND]' if cap_bound else ''}")
     if cap_bound:

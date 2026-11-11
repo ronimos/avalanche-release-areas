@@ -238,6 +238,9 @@ def main():
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
                          'A_ca_brittle and Pi1_elastic are read from the CSV '
                          'and keep the delta they were generated with.')
+    ap.add_argument('--energy-delta', type=float, default=config.ENERGY_DELTA,
+                    help=f'delta in the energy-mode G_c (default: {config.ENERGY_DELTA}; '
+                         'R was fitted at 0). The Eq. 20 delta (--delta) is unchanged.')
     ap.add_argument('--mask-mode', choices=('gate', 'diagnostic'),
                     default=config.MASK_MODE,
                     help=f'Start-zone mask use (default: {config.MASK_MODE}). '
@@ -249,9 +252,8 @@ def main():
     # Both are physics switches, not tuning knobs — see config.py.
     config.USE_ANISOTROPIC_RINGS = args.anisotropic_rings
     config.USE_MODE3_SPEED_CAP   = args.mode3_speed_cap
-    # release_geometry snapshots config.DELTA at import, so patch both.
     config.DELTA = args.delta
-    config.DELTA = args.delta
+    config.ENERGY_DELTA = args.energy_delta
     config.ARREST_MODE = args.arrest_mode
     config.MASK_MODE = args.mask_mode
     config.USE_SLAB_TENSILE_GATE = args.slab_tensile_gate

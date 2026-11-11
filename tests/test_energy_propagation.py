@@ -30,8 +30,9 @@ K_WL = weak_layer_stiffness(config.G_WL, D_WL)
 RG_SLAB = config.R_FIT * g_slab(SIG_T, H, E)            # 1.57 J/m2, saturated capability
 
 
-def tau_p_for(G_c, delta=config.DELTA):
+def tau_p_for(G_c, delta=None):
     """Weak-layer strength giving fracture energy G_c (tau_r = 0)."""
+    delta = config.ENERGY_DELTA if delta is None else delta
     return np.sqrt(2.0 * K_WL * G_c / (1.0 + delta))
 
 
