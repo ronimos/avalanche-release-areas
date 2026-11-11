@@ -54,8 +54,9 @@ GROUP_LABELS = {
 # Geometry helpers
 # ---------------------------------------------------------------------------
 
-def geojson_to_mask(path, dem_shape, transform, dst_epsg: int = config.RASTER_EPSG) -> np.ndarray:
+def geojson_to_mask(path, dem_shape, transform, dst_epsg: int = None) -> np.ndarray:
     """Rasterize a GeoJSON polygon to a boolean mask matching dem_shape."""
+    dst_epsg = config.RASTER_EPSG if dst_epsg is None else dst_epsg
     from shapely.geometry import shape
     from shapely.ops import unary_union
     from pyproj import Transformer as _T

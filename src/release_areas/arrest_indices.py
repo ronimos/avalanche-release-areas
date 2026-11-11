@@ -8,14 +8,7 @@ Units: SI (Pa, m, kg/m3, J/m2); angles in degrees.
 """
 import numpy as np
 
-from release_areas.config import (
-    MODE2_SPEED_RATIO,
-    MODE3_SPEED_RATIO,
-    FACET_STRENGTH_FACTOR,
-    FACETED_GRAIN_CLASSES,
-    MIXED_PRIMARY_CLASSES,
-    DMAX_FACTOR,
-)
+from release_areas import config
 
 G_ACC = 9.81
 
@@ -78,15 +71,17 @@ def tension_gradient(rho, psi_deg, phi_deg=27.0):
     return np.maximum(k, 0.0)
 
 
-def dynamic_factor(E, rho, nu=0.3, speed_ratio=MODE2_SPEED_RATIO):
+def dynamic_factor(E, rho, nu=0.3, speed_ratio=None):
     """k_x / k_f = c_p^2 / (c_p^2 + adot^2), adot = speed_ratio * c_s."""
+    speed_ratio = config.MODE2_SPEED_RATIO if speed_ratio is None else speed_ratio
     c_s, c_p = wave_speeds(E, rho, nu)
     adot = speed_ratio * c_s
     return c_p**2 / (c_p**2 + adot**2)
 
 
-def dynamic_gradient(k_f, E, rho, nu=0.3, speed_ratio=MODE2_SPEED_RATIO):
+def dynamic_gradient(k_f, E, rho, nu=0.3, speed_ratio=None):
     """k_x = k_f c_p^2 / (c_p^2 + adot^2)."""
+    speed_ratio = config.MODE2_SPEED_RATIO if speed_ratio is None else speed_ratio
     return k_f * dynamic_factor(E, rho, nu, speed_ratio)
 
 
@@ -117,8 +112,8 @@ def cp_over_cs(nu=0.3):
 
 
 def mode3_length_ratio(E, rho, nu=0.3,
-                       speed_ratio_along=MODE2_SPEED_RATIO,
-                       speed_ratio_cross=MODE3_SPEED_RATIO):
+                       speed_ratio_along=None,
+                       speed_ratio_cross=None):
     """L_dyn,III / L_dyn,II = k_x,II / k_x,III.
 
     A slower crack builds slab tension faster per unit advance, so the mode III
@@ -126,6 +121,8 @@ def mode3_length_ratio(E, rho, nu=0.3,
     c_s^2/c_p^2 = (1-nu)/2, E and rho cancel and this reduces to a function of
     nu and the two speed ratios alone: 0.712 at nu=0.3.
     """
+    speed_ratio_along = config.MODE2_SPEED_RATIO if speed_ratio_along is None else speed_ratio_along
+    speed_ratio_cross = config.MODE3_SPEED_RATIO if speed_ratio_cross is None else speed_ratio_cross
     return (dynamic_factor(E, rho, nu, speed_ratio_along)
             / dynamic_factor(E, rho, nu, speed_ratio_cross))
 
@@ -153,17 +150,6 @@ def slab_tensile_stress_cantilever(rho, h, l):
         / np.asarray(h, dtype=float)
 
 
-# Floor on r_c in slab_tensile_support (m). SNOWPACK reports r_c = 0 where the
-# slab's own weight overloads the weak layer (no cut needed): every such cluster
-# on the 2025-26 Little Professor CSVs has tau_g > tau_p, and they are the deep
-# slabs (97-100% of clusters with h > 3 m; 14 of 1608 on Jan 18, ~300 from late
-# Feb). r_c -> 0 drives the bending load to 0 and S_t to infinity, which is the
-# right limit (the slab cannot break before a zero-length crack), but it was a
-# divide by zero (891 RuntimeWarnings per 11-date run). 1 mm keeps S_t finite
-# (~1e5) without changing any gate outcome: the smallest positive r_c seen is
-# ~1 mm and S_t there is far above 1. Ron, 2026-11-10; same in both repos.
-RC_MIN_M = 1.0e-3
-
 
 def slab_tensile_support(sigma_t, rho, h, r_c):
     """S_t = sigma_t / sigma_max(l = r_c). S_t < 1: the slab breaks in tension
@@ -172,14 +158,12 @@ def slab_tensile_support(sigma_t, rho, h, r_c):
     not a fit. r_c is floored at RC_MIN_M (SNOWPACK's r_c = 0 means no cut is
     needed); a NaN r_c stays NaN, so the gate does not fire without data."""
     r_c = np.asarray(r_c, dtype=float)
-    r_c = np.where(np.isfinite(r_c), np.maximum(r_c, RC_MIN_M), r_c)
+    r_c = np.where(np.isfinite(r_c), np.maximum(r_c, config.RC_MIN_M), r_c)
     return np.asarray(sigma_t, dtype=float) / slab_tensile_stress_cantilever(rho, h, r_c)
 
 
-C_FIT = 0.045  # fitted from Meloche et al. 2025 Fig. 8 (two runs); see docs/release_area_methods.md §3
 
-
-def arrest_length(tau_g, theta, Lam, sigma_t, delta=1.0, L_t=None, C=C_FIT):
+def arrest_length(tau_g, theta, Lam, sigma_t, delta=1.0, L_t=None, C=None):
     """JGR Eq. 20: A_ca / L_t = C * X * sqrt(sigma_t / tau_g),
     X = tau_g / (theta Lam sqrt(1 + delta)). C = 0.045 is a two-run fit (Fig. 8).
 
@@ -187,6 +171,7 @@ def arrest_length(tau_g, theta, Lam, sigma_t, delta=1.0, L_t=None, C=C_FIT):
     re-deriving the scaling, so the C prefactor cannot be dropped.
 
     Returns (A_ca or A_ca/L_t, X)."""
+    C = config.C_FIT if C is None else C
     X = tau_g / (theta * Lam * np.sqrt(1.0 + delta))
     rel = C * X * np.sqrt(sigma_t / tau_g)
     return (rel * L_t if L_t is not None else rel), X
@@ -243,11 +228,11 @@ def slab_modulus_vanherwijnen2016(rho, scale=VH2016_SCALE, exp=VH2016_EXP):
 
 E_RELATIONS = {'vanherwijnen2016': slab_modulus_vanherwijnen2016,
                'project_fit': slab_modulus_project_fit}
-E_DEFAULT = 'vanherwijnen2016'
 
 
-def slab_modulus(rho, relation=E_DEFAULT):
+def slab_modulus(rho, relation=None):
     """E(rho) from a named relation; see E_RELATIONS."""
+    relation = config.E_RELATION if relation is None else relation
     try:
         return E_RELATIONS[relation](rho)
     except KeyError:
@@ -313,8 +298,8 @@ def facetedness(sphericity, dendricity, sp_ref=None):
     return np.clip(np.where(np.isfinite(f), f, 0.0), 0.0, 1.0)
 
 
-def facetedness_grain_class(grain_type, classes=FACETED_GRAIN_CLASSES,
-                            mixed_primary=MIXED_PRIMARY_CLASSES,
+def facetedness_grain_class(grain_type, classes=None,
+                            mixed_primary=None,
                             secondary=True):
     """f in {0, 1}: 1 where the layer is faceted by Jamieson & Johnston's
     (1990) grouping, from the SNOWPACK code 100 F1 + 10 F2 + marker.
@@ -326,6 +311,8 @@ def facetedness_grain_class(grain_type, classes=FACETED_GRAIN_CLASSES,
     the primary-only rule (2026-10-27, 163ea0f). 1 - sphericity under-counts
     both FCxr and the mixed forms. Missing or non-positive codes get f = 0.
     """
+    classes = config.FACETED_GRAIN_CLASSES if classes is None else classes
+    mixed_primary = config.MIXED_PRIMARY_CLASSES if mixed_primary is None else mixed_primary
     gt = np.asarray(grain_type, dtype=float)
     ok = np.isfinite(gt) & (gt > 0)
     code = np.round(np.where(ok, gt, 0.0)).astype(int)
@@ -342,8 +329,9 @@ def facetedness_grain_class(grain_type, classes=FACETED_GRAIN_CLASSES,
 FACET_SOURCES = ('grain_class', 'grain_class_primary', 'sphericity')
 
 
-def layer_tensile_strength(rho, f, a=FACET_STRENGTH_FACTOR, **kw):
+def layer_tensile_strength(rho, f, a=None, **kw):
     """sigma_t,i = sigma_t,RG(rho_i) * (1 - a f_i)."""
+    a = config.FACET_STRENGTH_FACTOR if a is None else a
     return slab_tensile_strength(rho, **kw) * (1.0 - a * np.asarray(f, dtype=float))
 
 
@@ -485,7 +473,6 @@ K_IC_RELATIONS = {
     'schweizer2004': {'func': k_ic_schweizer2004, 'rho': (80.0, 300.0)},
 }
 K_IC_PENDING = ('borstad2013',)
-K_IC_DEFAULT = 'schweizer2004'
 
 
 def _k_ic_spec(relation):
@@ -501,35 +488,22 @@ def _k_ic_spec(relation):
             f"available: {sorted(K_IC_RELATIONS)}") from None
 
 
-def k_ic_valid_range(relation=K_IC_DEFAULT):
+def k_ic_valid_range(relation=None):
     """(rho_min, rho_max) the relation was fitted over."""
+    relation = config.K_IC_RELATION if relation is None else relation
     return _k_ic_spec(relation)['rho']
 
 
-def k_ic_n_clamped(rho, relation=K_IC_DEFAULT):
+def k_ic_n_clamped(rho, relation=None):
     """How many finite rho values fall outside the relation's valid range."""
+    relation = config.K_IC_RELATION if relation is None else relation
     rho = np.asarray(rho, dtype=float)
     lo, hi = k_ic_valid_range(relation)
     return int(np.sum(np.isfinite(rho) & ((rho < lo) | (rho > hi))))
 
 
-# The density ranges in K_IC_RELATIONS are a GUIDELINE, not a limit (Ron,
-# 2026-11-09). They are what each relation was fitted over; Schweizer et al.
-# (2004) is 80-300 kg/m^3 from Swiss beam tests. Little Professor is a Colorado
-# high-alpine, wind-affected snowpack. On Jan 18 2026, 82% of the start-zone
-# clusters (avachain) have a mean slab density above 300, and every one has at
-# least one intact slab layer outside 80-300. Clamping evaluated those layers
-# at the range edge and understated K_Ic of dense slabs: the median ligament
-# K_Ic is 1318 clamped against 1650 Pa m^0.5 extrapolated (+25%). Kirchner et
-# al. (2000), fitted to 540, has 3% of clusters out of range. So since
-# 2026-11-10 (Ron) the power law is EXTRAPOLATED past its range by default
-# (K_IC_RANGE_MODE); n_rho_clamped now counts the extrapolated layers. The
-# trigger toughness gate (config.USE_TRIGGER_TOUGHNESS) reads the
-# ligament K_Ic, so this moves which triggers can start a release.
-K_IC_RANGE_MODE = 'extrapolate'   # 'extrapolate' | 'clamp' | 'nan'
 
-
-def k_ic(rho, relation=K_IC_DEFAULT, d_max=None, clamp=None):
+def k_ic(rho, relation=None, d_max=None, clamp=None):
     """K_Ic (Pa m^0.5) from a named density relation.
 
     Outside the relation's fitted density range: clamp=None (default) follows
@@ -538,10 +512,11 @@ def k_ic(rho, relation=K_IC_DEFAULT, d_max=None, clamp=None):
     clamp=False returns NaN. Density is not modified anywhere. Use
     k_ic_n_clamped() to count the out-of-range layers.
     """
+    relation = config.K_IC_RELATION if relation is None else relation
     spec = _k_ic_spec(relation)
     rho = np.asarray(rho, dtype=float)
     lo, hi = spec['rho']
-    mode = K_IC_RANGE_MODE if clamp is None else ('clamp' if clamp else 'nan')
+    mode = config.K_IC_RANGE_MODE if clamp is None else ('clamp' if clamp else 'nan')
     if mode == 'extrapolate':
         return spec['func'](rho, d_max)
     if mode == 'clamp':
@@ -552,24 +527,12 @@ def k_ic(rho, relation=K_IC_DEFAULT, d_max=None, clamp=None):
     return np.where((rho >= lo) & (rho <= hi), K, np.nan)
 
 
-# Trigger fracture toughness (Ron, 2026-11-09/10). A slab fracture at the
-# trigger starts at one point and propagates, so the slab's tensile capacity
-# there is also limited by its toughness: an edge crack of depth a in a slab of
-# toughness K_Ic fails at K_Ic / (F sqrt(pi a)). F = 1.122 is the
-# semi-infinite edge-crack factor and a = h/2 the crack depth; both are the
-# values the 2026-11-09 sweep evaluated (ski non-triggers 13/46 -> 0/46, Jan 18
-# triggers unchanged, robust to the K source). The finite-thickness factor
-# (edge_crack_strength's polynomial) would be ~2.8 at a/h = 0.5, i.e. stricter;
-# that was not evaluated.
-TOUGHNESS_EDGE_F = 1.122
-TOUGHNESS_A_FRAC = 0.5
-
 
 def toughness_limited_strength(sigma_t, K_Ic, h, a_frac=None, F=None):
     """min(sigma_t, K_Ic / (F sqrt(pi a))), a = a_frac * h. A missing K_Ic or
     h leaves sigma_t unchanged."""
-    a_frac = TOUGHNESS_A_FRAC if a_frac is None else a_frac
-    F = TOUGHNESS_EDGE_F if F is None else F
+    a_frac = config.TOUGHNESS_A_FRAC if a_frac is None else a_frac
+    F = config.TOUGHNESS_EDGE_F if F is None else F
     sigma_t = float(sigma_t)
     if not (np.isfinite(K_Ic) and np.isfinite(h) and h > 0 and a_frac > 0):
         return sigma_t
@@ -684,8 +647,8 @@ def edge_crack_strength(K_Ic, a, h, embedded=False, sigma_t_lig=None,
 
 
 def ligament_bound(rho_intact, dz_intact, st_intact, a, h, embedded,
-                   relation=K_IC_DEFAULT, d_max_intact=None,
-                   dmax_factor=DMAX_FACTOR, model='elhaddad',
+                   relation=None, d_max_intact=None,
+                   dmax_factor=None, model='elhaddad',
                    self_consistent_a0=False):
     """Ligament edge-crack bound from the intact layers. Returns a dict.
 
@@ -693,6 +656,8 @@ def ligament_bound(rho_intact, dz_intact, st_intact, a, h, embedded,
     minus the controlling layer, which is treated as the crack of length a).
     d_max_intact is a per-layer length in m; it is scaled by dmax_factor.
     """
+    relation = config.K_IC_RELATION if relation is None else relation
+    dmax_factor = config.DMAX_FACTOR if dmax_factor is None else dmax_factor
     out = {'sigma_t_ligament': np.nan, 'K_Ic_ligament': np.nan,
            'sigma_t_lig_intact': np.nan, 'a0_ligament': np.nan,
            'l_ch_ligament': np.nan, 'n_rho_clamped': 0}
@@ -719,11 +684,11 @@ def ligament_bound(rho_intact, dz_intact, st_intact, a, h, embedded,
 
 
 def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
-                   a=FACET_STRENGTH_FACTOR, sp_ref=None,
+                   a=None, sp_ref=None,
                    depth_i=None, K_Ic=None, h=None,
                    k_ic_relation=None, ligament_model='elhaddad',
-                   grain_size_i=None, dmax_factor=DMAX_FACTOR,
-                   e_relation=E_DEFAULT, e_relations_extra=(),
+                   grain_size_i=None, dmax_factor=None,
+                   e_relation=None, e_relations_extra=(),
                    k_ic_variants=(), self_consistent_a0=False,
                    st_relations_extra=(), grain_type_i=None,
                    facet_source='sphericity'):
@@ -749,6 +714,9 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
     (facetedness_grain_class with / without mixed forms, from grain_type_i,
     which is then required).
     """
+    a = config.FACET_STRENGTH_FACTOR if a is None else a
+    dmax_factor = config.DMAX_FACTOR if dmax_factor is None else dmax_factor
+    e_relation = config.E_RELATION if e_relation is None else e_relation
     if facet_source not in FACET_SOURCES:
         raise ValueError(f'facet_source {facet_source!r} not in {FACET_SOURCES}')
     if facet_source.startswith('grain_class') and grain_type_i is None:
@@ -849,7 +817,6 @@ def aggregate_slab(rho_i, dz_i, sphericity_i, dendricity_i,
 # ---------------------------------------------------------------------------
 # Energy-cap framework (hypothesis)
 # ---------------------------------------------------------------------------
-R_FIT = 0.48  # fitted from Meloche et al. 2025 Fig. 8 (two runs); see docs/release_area_methods.md §3
 
 
 def slab_energy_cap(sigma_t, h, E, nu=0.3):
@@ -874,9 +841,10 @@ def energy_ratio(tau_p, K_wl, sigma_t, h, E, delta=1.0, tau_r=0.0, nu=0.3):
     return weak_layer_fracture_energy(tau_p, K_wl, delta, tau_r) / slab_energy_cap(sigma_t, h, E, nu)
 
 
-def critical_strength(sigma_t, h, E, K_wl, delta=1.0, tau_r=0.0, R=R_FIT, nu=0.3):
+def critical_strength(sigma_t, h, E, K_wl, delta=1.0, tau_r=0.0, R=None, nu=0.3):
     """tau_p* where G_c(tau_p*) = R * G_slab.
     R must be a number; pass R='dynamic' to evaluate() to resolve it via k_x/k_f first."""
+    R = config.R_FIT if R is None else R
     G_cap = R * slab_energy_cap(sigma_t, h, E, nu)
     return tau_r + np.sqrt(2.0 * K_wl * G_cap / (1.0 + delta))
 
@@ -893,13 +861,17 @@ def arrest_length_energy(tau_p0, tau_p_star, theta):
 # Combined evaluation
 # ---------------------------------------------------------------------------
 def evaluate(rho, h, psi_deg, E, sigma_t, D_wl, G_wl, theta, a_c=None, a_sc=None,
-             nu=0.3, phi_deg=27.0, delta=1.0, C=C_FIT, tau_p0=None, R=R_FIT,
-             use_residual=False, speed_ratio_along=MODE2_SPEED_RATIO,
-             speed_ratio_cross=MODE3_SPEED_RATIO):
+             nu=0.3, phi_deg=27.0, delta=1.0, C=None, tau_p0=None, R=None,
+             use_residual=False, speed_ratio_along=None,
+             speed_ratio_cross=None):
     """All indices for one slab / weak-layer configuration.
     R: critical energy ratio (number) or 'dynamic' to use k_x/k_f.
     speed_ratio_along / speed_ratio_cross: crack speed as a multiple of c_s for
     mode II (supershear) and mode III (capped at c_s) propagation."""
+    C = config.C_FIT if C is None else C
+    R = config.R_FIT if R is None else R
+    speed_ratio_along = config.MODE2_SPEED_RATIO if speed_ratio_along is None else speed_ratio_along
+    speed_ratio_cross = config.MODE3_SPEED_RATIO if speed_ratio_cross is None else speed_ratio_cross
     Lam = elastic_length(E, h, D_wl, G_wl, nu)
     K_wl = weak_layer_stiffness(G_wl, D_wl)
     tau_g = gravitational_shear(rho, h, psi_deg)

@@ -11,7 +11,6 @@ import numpy as np
 from release_areas import config
 from release_areas.arrest_indices import (
     G_ACC,
-    R_FIT,
     gravitational_shear,
     plane_stress_modulus,
     residual_shear,
@@ -20,20 +19,23 @@ from release_areas.arrest_indices import (
 )
 
 
-def tau_net(rho, h, psi_deg, phi_deg=config.PHI_DEG):
+def tau_net(rho, h, psi_deg, phi_deg=None):
     """Net driving shear rho g h (sin psi - cos psi tan phi) (Pa); <= 0 at psi <= phi.
     Written as rho g h sin(psi - phi) / cos(phi), which is exactly 0 at psi = phi."""
+    phi_deg = config.PHI_DEG if phi_deg is None else phi_deg
     return (rho * G_ACC * h * np.sin(np.radians(psi_deg - phi_deg))
             / np.cos(np.radians(phi_deg)))
 
 
-def g_c(tau_p, K_wl, delta=config.DELTA, tau_r=0.0):
+def g_c(tau_p, K_wl, delta=None, tau_r=0.0):
     """Weak-layer fracture energy (tau_p - tau_r)^2 (1 + delta) / (2 K_wl) (J/m2)."""
+    delta = config.DELTA if delta is None else delta
     return weak_layer_fracture_energy(tau_p, K_wl, delta, tau_r)
 
 
-def g_slab(sigma_t, h, E, nu=config.NU):
+def g_slab(sigma_t, h, E, nu=None):
     """Slab energy cap sigma_t^2 h / (2 E') (J/m2)."""
+    nu = config.NU if nu is None else nu
     return slab_energy_cap(sigma_t, h, E, nu)
 
 
@@ -42,13 +44,16 @@ def n_max(sigma_t, h):
     return sigma_t * h
 
 
-def g_avail(N, E, h, nu=config.NU, R=R_FIT):
+def g_avail(N, E, h, nu=None, R=None):
     """Energy available from slab tension N: R N^2 / (2 E' h) (J/m2)."""
+    nu = config.NU if nu is None else nu
+    R = config.R_FIT if R is None else R
     return R * np.asarray(N, float)**2 / (2.0 * plane_stress_modulus(E, nu) * h)
 
 
-def e_column(relation=config.E_RELATION):
+def e_column(relation=None):
     """Feature column holding E_eff under `relation`."""
+    relation = config.E_RELATION if relation is None else relation
     return 'E_eff' if relation == config.E_RELATION else f'E_eff__{relation}'
 
 

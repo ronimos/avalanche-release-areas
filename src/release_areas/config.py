@@ -155,6 +155,50 @@ LIGAMENT_VARIANTS = (
     ('schweizer2004_d2', 'schweizer2004', 2.0),
 )
 
+# ---- Arrest-index fits and slab-fracture choices (arrest_indices) ----------
+# Here since 2026-11-11 (both repos; avachain model_params). Read at call time
+# as config.X, never bound as a default argument.
+C_FIT = 0.045  # Eq. 20 prefactor, fitted from Meloche et al. 2025 Fig. 8 (two runs); see docs/release_area_methods.md §3
+R_FIT = 0.48   # energy ratio, fitted from Meloche et al. 2025 Fig. 8 (two runs); see docs/release_area_methods.md §3
+
+# Floor on r_c in slab_tensile_support (m). SNOWPACK reports r_c = 0 where the
+# slab's own weight overloads the weak layer (no cut needed): every such cluster
+# on the 2025-26 Little Professor CSVs has tau_g > tau_p, and they are the deep
+# slabs (97-100% of clusters with h > 3 m; 14 of 1608 on Jan 18, ~300 from late
+# Feb). r_c -> 0 drives the bending load to 0 and S_t to infinity, which is the
+# right limit (the slab cannot break before a zero-length crack), but it was a
+# divide by zero (891 RuntimeWarnings per 11-date run). 1 mm keeps S_t finite
+# (~1e5) without changing any gate outcome: the smallest positive r_c seen is
+# ~1 mm and S_t there is far above 1. Ron, 2026-11-10; same in both repos.
+RC_MIN_M = 1.0e-3
+
+# The density ranges in K_IC_RELATIONS are a GUIDELINE, not a limit (Ron,
+# 2026-11-09). They are what each relation was fitted over; Schweizer et al.
+# (2004) is 80-300 kg/m^3 from Swiss beam tests. Little Professor is a Colorado
+# high-alpine, wind-affected snowpack. On Jan 18 2026, 82% of the start-zone
+# clusters (avachain) have a mean slab density above 300, and every one has at
+# least one intact slab layer outside 80-300. Clamping evaluated those layers
+# at the range edge and understated K_Ic of dense slabs: the median ligament
+# K_Ic is 1318 clamped against 1650 Pa m^0.5 extrapolated (+25%). Kirchner et
+# al. (2000), fitted to 540, has 3% of clusters out of range. So since
+# 2026-11-10 (Ron) the power law is EXTRAPOLATED past its range by default
+# (K_IC_RANGE_MODE); n_rho_clamped now counts the extrapolated layers. The
+# trigger toughness gate (config.USE_TRIGGER_TOUGHNESS) reads the
+# ligament K_Ic, so this moves which triggers can start a release.
+K_IC_RANGE_MODE = 'extrapolate'   # 'extrapolate' | 'clamp' | 'nan'
+
+# Trigger fracture toughness (Ron, 2026-11-09/10). A slab fracture at the
+# trigger starts at one point and propagates, so the slab's tensile capacity
+# there is also limited by its toughness: an edge crack of depth a in a slab of
+# toughness K_Ic fails at K_Ic / (F sqrt(pi a)). F = 1.122 is the
+# semi-infinite edge-crack factor and a = h/2 the crack depth; both are the
+# values the 2026-11-09 sweep evaluated (ski non-triggers 13/46 -> 0/46, Jan 18
+# triggers unchanged, robust to the K source). The finite-thickness factor
+# (edge_crack_strength's polynomial) would be ~2.8 at a/h = 0.5, i.e. stricter;
+# that was not evaluated.
+TOUGHNESS_EDGE_F = 1.122
+TOUGHNESS_A_FRAC = 0.5
+
 # -----------------------------------------------------------------------
 # Trigger selection filter chain (generate_scenarios)
 # -----------------------------------------------------------------------
@@ -391,7 +435,7 @@ ARREST_MODE         = 'legacy'        # BFS arrest rule: 'legacy' (propagate_cra
 SIGMA_T_COLUMN      = 'sigma_t_mean'  # thickness-weighted slab σt; 'sigma_t_wl' = weakest-link bound (methods §4)
 ENERGY_USE_RESIDUAL = False           # τr = 0 in G_c, as arrest_indices.evaluate(use_residual=False)
 MASK_MODE           = 'gate'          # start-zone KML: 'gate' (BFS rejects, polygon clipped) or 'diagnostic' (reporting only); brief Step 4
-ENERGY_R            = None           # energy ratio R; None = arrest_indices.R_FIT (Meloche Fig. 8 fit). Set only for sensitivity runs
+ENERGY_R            = None           # energy ratio R; None = R_FIT (Meloche Fig. 8 fit). Set only for sensitivity runs
 
 # -----------------------------------------------------------------------
 # Scenario sweep

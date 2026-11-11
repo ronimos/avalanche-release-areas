@@ -10,7 +10,8 @@ scenario_writer  Scenario-to-GeoJSON / CSV output
 config           Default physical and operational parameters
 """
 
-from release_areas.arrest_indices import evaluate, R_FIT
+from release_areas.arrest_indices import evaluate
+from release_areas.config import R_FIT
 from release_areas.release_geometry import (
     make_release_polygon_2d,
     propagate_crack,

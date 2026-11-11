@@ -50,8 +50,8 @@ def test_defaults_match_avachain():
     assert config.USE_TRIGGER_TOUGHNESS is True
     assert config.USE_DISTANCE_CAPS is True
     assert config.TOUGHNESS_K_COL == 'K_Ic_ligament'
-    assert (ai.TOUGHNESS_EDGE_F, ai.TOUGHNESS_A_FRAC) == (1.122, 0.5)
-    assert ai.K_IC_RANGE_MODE == 'extrapolate'
+    assert (config.TOUGHNESS_EDGE_F, config.TOUGHNESS_A_FRAC) == (1.122, 0.5)
+    assert config.K_IC_RANGE_MODE == 'extrapolate'
 
 
 def test_tau_ratio_floor_default_off():

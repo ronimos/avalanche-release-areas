@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from release_areas import arrest_indices as ai
+from release_areas import config
 
 RHO, DZ_N = 300.0, 5
 SP_RG, SP_FC = 0.9, 0.1
@@ -290,7 +291,7 @@ class TestKIcRelations:
 
     def test_extrapolation_is_the_default(self):
         # Ron 2026-11-10: the fitted density range is a guideline, not a clamp.
-        assert ai.K_IC_RANGE_MODE == 'extrapolate'
+        assert config.K_IC_RANGE_MODE == 'extrapolate'
         for rho in (50.0, 900.0):
             assert ai.k_ic(rho, 'kirchner2000') == pytest.approx(
                 7.84e3 * (rho / 917.0) ** 2.3)
@@ -336,7 +337,7 @@ class TestKIcRelations:
         assert np.isnan(ai.k_ic(250.0, 'schweizer2004'))
 
     def test_schweizer2004_is_the_default(self):
-        assert ai.K_IC_DEFAULT == 'schweizer2004'
+        assert config.K_IC_RELATION == 'schweizer2004'
 
     def test_kirchner_is_a_lower_bound_vs_schweizer(self):
         # at d_max = 1 mm, within both validity windows
@@ -496,7 +497,7 @@ class TestLigamentFromIntactLayers:
 
 class TestEModulusRelations:
     def test_vanherwijnen2016_is_the_default(self):
-        assert ai.E_DEFAULT == 'vanherwijnen2016'
+        assert config.E_RELATION == 'vanherwijnen2016'
         assert ai.slab_modulus(250.0) == pytest.approx(0.93 * 250.0 ** 2.8)
 
     def test_project_fit_still_available_unchanged(self):

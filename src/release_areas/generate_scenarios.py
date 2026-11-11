@@ -84,8 +84,9 @@ def rank_triggers(cand_df: pd.DataFrame, n: int, sk38_col: str,
 
 
 def load_kml_mask(kml_path: Path, dem_shape, transform,
-                  dst_epsg: int = config.RASTER_EPSG) -> np.ndarray:
+                  dst_epsg: int = None) -> np.ndarray:
     """Parse a KML polygon using stdlib XML (no fastkml dependency)."""
+    dst_epsg = config.RASTER_EPSG if dst_epsg is None else dst_epsg
     import xml.etree.ElementTree as ET
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
@@ -250,7 +251,7 @@ def main():
     config.USE_MODE3_SPEED_CAP   = args.mode3_speed_cap
     # release_geometry snapshots config.DELTA at import, so patch both.
     config.DELTA = args.delta
-    _rg.MELOCHE_DELTA = args.delta
+    config.DELTA = args.delta
     config.ARREST_MODE = args.arrest_mode
     config.MASK_MODE = args.mask_mode
     config.USE_SLAB_TENSILE_GATE = args.slab_tensile_gate

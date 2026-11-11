@@ -164,14 +164,14 @@ def test_rc_zero_is_floored_not_divided_by_zero():
     divide-by-zero and S_t = inf. Floored at RC_MIN_M it is finite, far above
     1 (the gate outcome is unchanged), and raises no warning (Ron, 2026-11-10)."""
     import warnings
-    assert ai.RC_MIN_M == 1.0e-3
+    assert config.RC_MIN_M == 1.0e-3
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s0 = float(ai.slab_tensile_support(3000.0, 330.0, 4.0, 0.0))
         s_arr = np.asarray(ai.slab_tensile_support([3000.0, 3000.0], [330.0, 330.0],
                                                    [4.0, 4.0], [0.0, np.nan]))
     assert np.isfinite(s0) and s0 > 1e4
-    assert s0 == float(ai.slab_tensile_support(3000.0, 330.0, 4.0, ai.RC_MIN_M))
+    assert s0 == float(ai.slab_tensile_support(3000.0, 330.0, 4.0, config.RC_MIN_M))
     assert np.isfinite(s_arr[0]) and np.isnan(s_arr[1])   # missing r_c stays NaN
     # above the floor the closed form is untouched
     rho, h, rc = 300.0, 1.2, 0.35

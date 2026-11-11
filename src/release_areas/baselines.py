@@ -39,13 +39,16 @@ def propagate_baseline(
         slope_grid: np.ndarray,
         transform,
         start_zone_mask: Optional[np.ndarray] = None,
-        stauchwall_deg: float = config.STAUCHWALL_DEG,
+        stauchwall_deg: float = None,
         snap_features: 'Optional[pd.DataFrame]' = None,
-        k_neighbours: int = config.BFS_K_NEIGHBOURS,
-        max_clusters: int = config.MAX_BFS_CLUSTERS,
+        k_neighbours: int = None,
+        max_clusters: int = None,
         pixel_index: Optional[dict] = None,
         state_out: Optional[dict] = None):
     """Flood-fill on the BFS cluster graph with a per-cell admission test; returns (polygon, reached)."""
+    stauchwall_deg = config.STAUCHWALL_DEG if stauchwall_deg is None else stauchwall_deg
+    k_neighbours = config.BFS_K_NEIGHBOURS if k_neighbours is None else k_neighbours
+    max_clusters = config.MAX_BFS_CLUSTERS if max_clusters is None else max_clusters
     if mode not in BASELINE_MODES:
         raise ValueError(f"unknown baseline mode {mode!r}")
     if pixel_index is None:

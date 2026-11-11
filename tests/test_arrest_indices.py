@@ -17,14 +17,12 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from release_areas import config
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from release_areas.arrest_indices import (
-    MODE2_SPEED_RATIO,
-    MODE3_SPEED_RATIO,
-    R_FIT,
     arrest_length,
     mode3_length_ratio,
     arrest_length_energy,
@@ -63,7 +61,7 @@ def _ev(**kw):
         rho=p['rho'], h=p['h'], psi_deg=p['psi_deg'], E=p['E'],
         sigma_t=p['sigma_t'], D_wl=p['D_wl'], G_wl=p['G_wl'],
         theta=p['theta'], nu=p['nu'], phi_deg=p['phi_deg'], delta=p['delta'],
-        tau_p0=p.get('tau_p0'), C=0.045, R=R_FIT,
+        tau_p0=p.get('tau_p0'), C=0.045, R=config.R_FIT,
     )
 
 
@@ -220,13 +218,13 @@ class TestPrimitiveFunctions:
         assert weak_layer_fracture_energy(tau_p, K_wl, delta=delta) == pytest.approx(expected, rel=1e-9)
 
     def test_energy_ratio_at_tau_p_star_equals_R_FIT(self):
-        # By construction, energy_ratio(tau_p_star, ...) = R_FIT
+        # By construction, energy_ratio(tau_p_star, ...) = config.R_FIT
         sigma_t, h, E, nu = 6e3, 0.5, 4e6, 0.3
         K_wl = 0.2e6 / 0.04  # G_wl / D_wl = 5e6 Pa/m
         delta = 0.0
-        tau_p_star = critical_strength(sigma_t, h, E, K_wl, delta=delta, R=R_FIT, nu=nu)
+        tau_p_star = critical_strength(sigma_t, h, E, K_wl, delta=delta, R=config.R_FIT, nu=nu)
         R = energy_ratio(tau_p_star, K_wl, sigma_t, h, E, delta=delta, nu=nu)
-        assert R == pytest.approx(R_FIT, rel=1e-6)
+        assert R == pytest.approx(config.R_FIT, rel=1e-6)
 
     def test_tensile_length_positive_for_positive_k(self):
         val = tensile_length(6e3, 300.0)
@@ -336,8 +334,8 @@ class TestModeIIISpeedCap:
     unit advance, so cross-slope first-fracture distance is shorter."""
 
     def test_speed_ratios(self):
-        assert MODE2_SPEED_RATIO == 1.6
-        assert MODE3_SPEED_RATIO == 1.0
+        assert config.MODE2_SPEED_RATIO == 1.6
+        assert config.MODE3_SPEED_RATIO == 1.0
 
     def test_ratio_value_at_nu_0p3(self):
         # 1/(1 + 1.0^2*0.35) / (1/(1 + 1.6^2*0.35)) = 1.35/1.896

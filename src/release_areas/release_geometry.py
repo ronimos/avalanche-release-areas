@@ -46,12 +46,6 @@ from release_areas.arrest_indices import (arrest_length, slab_tensile_support,
                                           toughness_limited_strength)
 
 # Re-exported for backwards compatibility; config is the source of truth.
-STAUCHWALL_DEG     = config.STAUCHWALL_DEG
-FRICTION_DEG       = config.PHI_DEG
-GAUME_ASPECT_CAP   = config.GAUME_ASPECT_CAP
-MIN_POLYGON_AREA   = config.MIN_POLYGON_AREA
-USE_MELOCHE_ARREST = config.USE_MELOCHE_ARREST
-MELOCHE_DELTA      = config.DELTA
 
 
 def mode3_speed_cap_ratio(trigger_cluster_id: int,
@@ -247,7 +241,7 @@ def find_stauchwall(trigger_row: int,
                     trigger_col: int,
                     slope_grid: np.ndarray,
                     aspect_grid: np.ndarray,
-                    threshold_deg: float = STAUCHWALL_DEG,
+                    threshold_deg: float = None,
                     max_steps: int = 500
                     ) -> tuple[int, int]:
     """Walk downslope from trigger pixel until slope drops below threshold.
@@ -261,6 +255,7 @@ def find_stauchwall(trigger_row: int,
     quantisation sent every trigger off at 135 deg, a systematic +14 deg
     median clockwise error that rotated the release polygons toward south.
     """
+    threshold_deg = config.STAUCHWALL_DEG if threshold_deg is None else threshold_deg
     nrows, ncols = slope_grid.shape
     row, col     = trigger_row, trigger_col
     row_f, col_f = float(trigger_row), float(trigger_col)
@@ -344,7 +339,7 @@ def estimate_cross_slope_width(
         snap_features: Optional[pd.DataFrame] = None,
         pixel_index: Optional[dict] = None,
         n_lateral_neighbors: int = 6,
-        gaume_aspect_cap: float = GAUME_ASPECT_CAP,
+        gaume_aspect_cap: float = None,
         aspect_deg: Optional[float] = None) -> float:
     """Estimate cross-slope release width (m) using Gaume et al. (2015) / θ.
 
@@ -373,6 +368,7 @@ def estimate_cross_slope_width(
     The CSV θ is still used as a fallback numerator when no cluster lies in the
     along-slope sector.
     """
+    gaume_aspect_cap = config.GAUME_ASPECT_CAP if gaume_aspect_cap is None else gaume_aspect_cap
     if meloche_df.empty or 'theta' not in meloche_df.columns:
         return A_ca
 
@@ -471,8 +467,8 @@ def make_release_polygon_2d(
         start_zone_mask: Optional[np.ndarray] = None,
         snap_features: 'Optional[pd.DataFrame]' = None,
         size_factor: float = 1.0,
-        stauchwall_deg: float = STAUCHWALL_DEG,
-        max_clusters: int = config.MAX_BFS_CLUSTERS,
+        stauchwall_deg: float = None,
+        max_clusters: int = None,
         pixel_index: Optional[dict] = None,
         use_propagation: bool = True,
         state_out: Optional[dict] = None):
@@ -491,6 +487,8 @@ def make_release_polygon_2d(
 
     Returns shapely Polygon (UTM) or None.
     """
+    stauchwall_deg = config.STAUCHWALL_DEG if stauchwall_deg is None else stauchwall_deg
+    max_clusters = config.MAX_BFS_CLUSTERS if max_clusters is None else max_clusters
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
     import rasterio.features
@@ -524,7 +522,8 @@ def make_release_polygon_2d(
             [Polygon(s['coordinates'][0]) for s, v in sw_shapes if v == 1])
         sw_polygon = sw_polygon.simplify(1.0, preserve_topology=True)
 
-    def _clip_polygon(poly, min_area=MIN_POLYGON_AREA):
+    def _clip_polygon(poly, min_area=None):
+        min_area = config.MIN_POLYGON_AREA if min_area is None else min_area
         if poly is None or poly.is_empty:
             return None
         if sz_polygon is not None:
@@ -578,7 +577,7 @@ def make_release_polygon_2d(
             state_out          = state_out,
         )
         if polygon is not None:
-            polygon = _clip_polygon(polygon, 0.0 if energy_mode else MIN_POLYGON_AREA)
+            polygon = _clip_polygon(polygon, 0.0 if energy_mode else config.MIN_POLYGON_AREA)
             if polygon is not None:
                 return polygon
         if energy_mode:
@@ -770,12 +769,12 @@ def propagate_crack(
         slope_grid: np.ndarray,
         transform,
         start_zone_mask: Optional[np.ndarray] = None,
-        stauchwall_deg: float = STAUCHWALL_DEG,
+        stauchwall_deg: float = None,
         size_factor: float = 1.0,
         A_ca: Optional[float] = None,
         snap_features: 'Optional[pd.DataFrame]' = None,
-        k_neighbours: int = config.BFS_K_NEIGHBOURS,
-        max_clusters: int = config.MAX_BFS_CLUSTERS,
+        k_neighbours: int = None,
+        max_clusters: int = None,
         pixel_index: Optional[dict] = None,
         aspect_grid: Optional[np.ndarray] = None,
         wave_callback=None,
@@ -799,6 +798,9 @@ def propagate_crack(
 
     Returns (polygon, reached_cluster_ids).
     """
+    stauchwall_deg = config.STAUCHWALL_DEG if stauchwall_deg is None else stauchwall_deg
+    k_neighbours = config.BFS_K_NEIGHBOURS if k_neighbours is None else k_neighbours
+    max_clusters = config.MAX_BFS_CLUSTERS if max_clusters is None else max_clusters
     if config.ARREST_MODE == 'energy':
         return propagate_crack_energy(
             trigger_cluster_id, cluster_map, dem, slope_grid, transform,
@@ -991,7 +993,7 @@ def propagate_crack(
             if np.isfinite(s_t) and s_t < 1.0:
                 return False, 'slab_tensile_failure'
 
-        if USE_MELOCHE_ARREST:
+        if config.USE_MELOCHE_ARREST:
             cur_cid = current_props.get('cid')
             xy_c    = centroids.get(cur_cid)
             xy_n    = centroids.get(cid)
@@ -1016,7 +1018,7 @@ def propagate_crack(
                             # implementation in arrest_indices.
                             A_ca_d, _ = arrest_length(
                                 tg, theta_dir, Lam, sig_t,
-                                delta=MELOCHE_DELTA, L_t=L_t)
+                                delta=config.DELTA, L_t=L_t)
                             if A_ca_d < dist_cn:
                                 return False, 'meloche_arrest'
             return True, 'propagated'
@@ -1242,10 +1244,10 @@ def propagate_crack_energy(
         slope_grid: np.ndarray,
         transform,
         start_zone_mask: Optional[np.ndarray] = None,
-        stauchwall_deg: float = STAUCHWALL_DEG,
+        stauchwall_deg: float = None,
         snap_features: 'Optional[pd.DataFrame]' = None,
-        k_neighbours: int = config.BFS_K_NEIGHBOURS,
-        max_clusters: int = config.MAX_BFS_CLUSTERS,
+        k_neighbours: int = None,
+        max_clusters: int = None,
         pixel_index: Optional[dict] = None,
         aspect_grid: Optional[np.ndarray] = None,
         wave_callback=None,
@@ -1264,9 +1266,11 @@ def propagate_crack_energy(
 
     Returns (polygon, reached_cluster_ids); a trigger-only region still gives a polygon.
     """
+    stauchwall_deg = config.STAUCHWALL_DEG if stauchwall_deg is None else stauchwall_deg
+    k_neighbours = config.BFS_K_NEIGHBOURS if k_neighbours is None else k_neighbours
+    max_clusters = config.MAX_BFS_CLUSTERS if max_clusters is None else max_clusters
     import heapq
     from release_areas import energy_path as ep
-    from release_areas.arrest_indices import R_FIT
 
     if snap_features is None:
         return None, set()
@@ -1277,7 +1281,7 @@ def propagate_crack_energy(
     px_m = abs(transform.a) if transform is not None else 1.0
     if aspect_grid is None:
         _, aspect_grid = compute_slope_aspect(dem, px_m)
-    R = R_FIT if config.ENERGY_R is None else config.ENERGY_R
+    R = config.R_FIT if config.ENERGY_R is None else config.ENERGY_R
 
     neighbours, centroids = _cluster_graph(pixel_index, transform, k_neighbours)
     edge_px = _domain_edge_pixels(cluster_map, dem)
@@ -1436,8 +1440,9 @@ def _cluster_graph(pixel_index: dict, transform, k_neighbours: int):
 
 
 def _reached_polygon(reached, cluster_map, transform, min_clusters: int = 2,
-                     min_area: float = MIN_POLYGON_AREA):
+                     min_area: float = None):
     """Largest hole-filled polygon of the reached clusters, or None if too small."""
+    min_area = config.MIN_POLYGON_AREA if min_area is None else min_area
     from shapely.ops import unary_union
     from shapely.geometry import shape as shapely_shape
     import rasterio.features
@@ -1489,8 +1494,9 @@ def rasterize_release_polygon(polygon,
 # GeoJSON loader (shared by scripts)
 # -----------------------------------------------------------------------
 
-def load_observed_polygon(path, dst_epsg: int = config.RASTER_EPSG):
+def load_observed_polygon(path, dst_epsg: int = None):
     """Load a GeoJSON polygon file and reproject to the raster CRS."""
+    dst_epsg = config.RASTER_EPSG if dst_epsg is None else dst_epsg
     import json
     import re
     from shapely.geometry import shape, Polygon, MultiPolygon
@@ -1534,12 +1540,13 @@ def _label_from_release_path(path) -> str:
     return Path(path).stem
 
 
-def load_observed_polygons(primary_path, dst_epsg: int = config.RASTER_EPSG) -> list:
+def load_observed_polygons(primary_path, dst_epsg: int = None) -> list:
     """Load all avalanche_release_area_*.geojson files from the same directory as primary_path.
 
     Returns a list of (polygon, label) tuples sorted by filename so that new
     release areas added to the boundaries directory appear automatically.
     """
+    dst_epsg = config.RASTER_EPSG if dst_epsg is None else dst_epsg
     if primary_path is None:
         return []
     parent = Path(primary_path).parent

@@ -21,13 +21,22 @@ with this block, this block wins.
   `USE_MODE3_LAMBDA = False`, `USE_MODE3_SPEED_CAP = False`,
   `N_TOP_TRIGGERS = 3`. Methods doc §5 has the gate and Stauchwall sections.
 - **Added 2026-11-10 (Ron, both repos):** `USE_TRIGGER_TOUGHNESS = True`
-  (trigger σt capped by K_Ic/(1.122√(πh/2))), `arrest_indices.K_IC_RANGE_MODE =
+  (trigger σt capped by K_Ic/(1.122√(πh/2))), `K_IC_RANGE_MODE =
   'extrapolate'`, `USE_DISTANCE_CAPS` (default on; avachain's Little Professor
   calibration turns it off), `TAU_RATIO_FLOOR` (default 0 = off; Little
   Professor 0.65 by calibration), and `USE_SLAB_CRACK_LINES = True`: a slab the
   tensile gate breaks starts a crown/flank crack that runs as a line after the
   BFS and cuts off the area it severs (no toughness test; it never binds). All
   in methods doc §5.
+- **2026-11-11 (both repos):** every model parameter is in `config.py`, read
+  as `config.X` at call time. `C_FIT`, `R_FIT`, `RC_MIN_M`, `K_IC_RANGE_MODE`
+  and `TOUGHNESS_EDGE_F/A_FRAC` moved there from `arrest_indices`;
+  `E_DEFAULT`/`K_IC_DEFAULT` are `config.E_RELATION`/`K_IC_RELATION`;
+  `release_geometry`'s frozen copies (`STAUCHWALL_DEG = config.STAUCHWALL_DEG`,
+  `FRICTION_DEG`, `MELOCHE_DELTA`, …) are gone. No function binds a config
+  value as a default argument (that freezes it at import); take `None` and
+  resolve inside. avachain's `model_params.py` holds the same values, and its
+  `tests/test_model_params.py` compares them with this file.
 - **Reference CSVs** come from avachain's 2026-10-27 forcing rebuild. That
   rebuild removed 21 false avalanche corrections from the forcing (Ron: Jan 18
   is the only avalanche of the season) and aligned the reinit time.

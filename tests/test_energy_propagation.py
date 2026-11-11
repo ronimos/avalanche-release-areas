@@ -11,7 +11,6 @@ from affine import Affine
 
 from release_areas import config
 from release_areas.arrest_indices import (
-    R_FIT,
     slab_modulus,
     slab_tensile_strength,
     weak_layer_stiffness,
@@ -28,7 +27,7 @@ T = Affine(1.0, 0.0, 400000.0, 0.0, -1.0, 4000000.0)
 BLOCK = 3
 RHO, H, E, SIG_T, D_WL = 300.0, 1.0, 5e6, 6e3, 0.04
 K_WL = weak_layer_stiffness(config.G_WL, D_WL)
-RG_SLAB = R_FIT * g_slab(SIG_T, H, E)            # 1.57 J/m2, saturated capability
+RG_SLAB = config.R_FIT * g_slab(SIG_T, H, E)            # 1.57 J/m2, saturated capability
 
 
 def tau_p_for(G_c, delta=config.DELTA):
@@ -143,7 +142,7 @@ def test_thin_slab_band_arrests_at_band():
     band = (15.0, 21.0)       # two clusters: edge clusters' k-NN links span 6 m
     rho_b, h_b = 250.0, 0.4
     E_b, st_b = float(slab_modulus(rho_b)), float(slab_tensile_strength(rho_b))
-    assert R_FIT * g_slab(st_b, h_b, E_b) < 0.3
+    assert config.R_FIT * g_slab(st_b, h_b, E_b) < 0.3
 
     def snow(y, x):
         if band[0] <= y < band[1]:

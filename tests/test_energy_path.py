@@ -6,7 +6,6 @@ from rasterio.transform import from_origin
 
 from release_areas import config
 from release_areas.arrest_indices import (
-    R_FIT,
     arrest_length_energy,
     critical_strength,
     gravitational_shear,
@@ -40,11 +39,11 @@ class TestJGRCasesThroughEnergyPath:
     ])
     def test_arrest_point_on_ramp(self, theta, delta, expected):
         x = np.arange(0.0, 200.0, 0.001)
-        G_av = g_avail(n_max(SIG_T, H), E, H, NU, R_FIT)
+        G_av = g_avail(n_max(SIG_T, H), E, H, NU, config.R_FIT)
         stopped = g_c(TAU_P0 + theta * x, K_WL, delta) > G_av
         x_arrest = x[np.argmax(stopped)]
         assert x_arrest == pytest.approx(expected, abs=0.01)
-        tau_star = critical_strength(SIG_T, H, E, K_WL, delta, 0.0, R_FIT, NU)
+        tau_star = critical_strength(SIG_T, H, E, K_WL, delta, 0.0, config.R_FIT, NU)
         assert x_arrest == pytest.approx(
             arrest_length_energy(TAU_P0, tau_star, theta), abs=0.002)
 
@@ -64,7 +63,7 @@ class TestPrimitives:
         assert tau_net(RHO, H, PSI) == pytest.approx(expected, rel=1e-12)
 
     def test_g_avail_at_n_max_is_r_times_g_slab(self):
-        for R in (0.3, R_FIT, 0.7):
+        for R in (0.3, config.R_FIT, 0.7):
             assert g_avail(n_max(SIG_T, H), E, H, NU, R) == pytest.approx(
                 R * g_slab(SIG_T, H, E, NU), rel=1e-12)
 
