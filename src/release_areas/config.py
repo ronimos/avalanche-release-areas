@@ -117,6 +117,17 @@ FACET_SOURCE = 'grain_class'
 FACETED_GRAIN_CLASSES = (4, 5, 9)
 MIXED_PRIMARY_CLASSES = (1, 2, 3)
 
+# ============================================================================
+# WEAK-LAYER DETECTION (snowpack_features.split_wl_slab)
+# ============================================================================
+# Basal FCxr (9xx, rounding facets) under the FC/DH sequence counts as part of
+# the basal weak layer (Ron, 2026-10-25). Without it, 251 of 732 Jan 18 crown
+# clusters had no weak layer: 1-4 basal 990 elements (median 4.7 cm) sat under
+# FC and the first-element test failed. Only a run of FCxr AT THE GROUND is
+# admitted; FCxr above the first FC/DH element still ends the block, so every
+# profile with an FC/DH base splits exactly as before.
+BASAL_FCXR_IS_WL = True
+
 # Extra sigma_t(rho) relations emitted by aggregate_slab as
 # sigma_t_mean__<name> / sigma_t_wl__<name> (arrest_indices.ST_RELATIONS).
 ST_RELATIONS_EXTRA = ('jamieson1990',)

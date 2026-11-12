@@ -171,7 +171,14 @@ def split_wl_slab(grain_type, z):
     order        = np.argsort(z_ok)
     gt_sorted    = gt_ok[order]
     z_sorted     = z_ok[order]
+    # Only FC (4xx) and DH (5xx) are weak layer grain types, plus a basal
+    # FCxr (9xx) run when BASAL_FCXR_IS_WL.
     is_wl_sorted = (gt_sorted // 100 == 4) | (gt_sorted // 100 == 5)
+    n_fcxr = 0
+    if config.BASAL_FCXR_IS_WL:
+        while n_fcxr < len(gt_sorted) and gt_sorted[n_fcxr] // 100 == 9:
+            n_fcxr += 1
+        is_wl_sorted[:n_fcxr] = True
 
     if not is_wl_sorted[0]:
         return None, None, None

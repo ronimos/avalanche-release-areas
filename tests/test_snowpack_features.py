@@ -183,3 +183,40 @@ class TestFacetSource:
         assert by_class['f_mean_weighted'] == pytest.approx(0.5)
         assert by_sph['f_mean_weighted'] == pytest.approx(0.25)
         assert by_class['sigma_t_mean__jamieson1990'] < by_sph['sigma_t_mean__jamieson1990']
+
+
+# ---------------------------------------------------------------------------
+# Basal FCxr starts the weak layer (config.BASAL_FCXR_IS_WL; port of avachain
+# 7b1c997, 2026-10-25). Without it, 251 of 732 Jan 18 crown clusters had no
+# weak layer: 1-4 basal 990 elements under FC failed the first-element test.
+# ---------------------------------------------------------------------------
+
+def test_basal_fcxr_under_fc_starts_the_wl():
+    gt = np.array([990.0, 990.0, 450.0, 310.0])
+    z  = np.array([-1.9,  -1.85, -1.8,  -0.5])
+    slab, wl, iface = split_wl_slab(gt, z)
+    assert list(wl) == [True, True, True, False]
+    assert slab[3]
+    assert iface == pytest.approx(-1.8)
+
+
+def test_basal_fcxr_alone_is_the_wl():
+    slab, wl, iface = split_wl_slab(np.array([990.0, 310.0, 310.0]),
+                                    np.array([-1.5, -1.0, -0.5]))
+    assert list(wl) == [True, False, False]
+
+
+def test_fcxr_above_basal_fc_still_ends_the_block():
+    gt = np.array([450.0, 990.0, 450.0, 310.0])
+    z  = np.array([-2.0,  -1.5,  -1.0,  -0.5])
+    slab, wl, iface = split_wl_slab(gt, z)
+    assert list(wl) == [True, False, False, False]
+    assert iface == pytest.approx(-2.0)
+
+
+def test_basal_fcxr_switch_off_restores_the_old_rule(monkeypatch):
+    from release_areas import config
+    monkeypatch.setattr(config, 'BASAL_FCXR_IS_WL', False)
+    slab, wl, iface = split_wl_slab(np.array([990.0, 450.0, 310.0]),
+                                    np.array([-1.5, -1.0, -0.5]))
+    assert slab is None
