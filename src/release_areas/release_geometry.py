@@ -640,6 +640,34 @@ def slab_crack_orientation(xy_from, xy_to, fall_xy, align_cos=None):
     return None
 
 
+def severed_slides(severed, neighbours, slope_of, mu=None) -> set:
+    """Clusters of `severed` that slide anyway (USE_SEVERED_SLIDE): each piece
+    (connected component of `severed` in the BFS graph, made symmetric) whose
+    mean cluster slope exceeds atan(mu). Order-independent. Same as ~/avachain."""
+    mu = config.SEVERED_SLIDE_MU if mu is None else mu
+    lim = np.degrees(np.arctan(mu))
+    severed = set(severed)
+    adj = {c: set() for c in severed}
+    for c, nb in neighbours.items():
+        for u in nb:
+            if c in severed and u in severed:
+                adj[c].add(u); adj[u].add(c)
+    slides, seen = set(), set()
+    for c0 in sorted(severed):
+        if c0 in seen:
+            continue
+        comp, stack = set(), [c0]
+        while stack:
+            c = stack.pop()
+            if c in comp:
+                continue
+            comp.add(c); stack.extend(adj[c] - comp)
+        seen |= comp
+        if np.mean([slope_of(c) for c in comp]) > lim:
+            slides |= comp
+    return slides
+
+
 def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
                      fall_xy, props, slope_of, cluster_map, phi_deg=None,
                      band_m=None, align_cos=None):
@@ -1198,6 +1226,10 @@ def propagate_crack(
         severed, sc_stats = slab_crack_lines(
             reached, slab_cracks, trigger_cluster_id, neighbours, centroids,
             fall_xy, cluster_props, _mean_slope, cluster_map)
+        if config.USE_SEVERED_SLIDE and severed:
+            slides = severed_slides(severed, neighbours, _mean_slope)
+            sc_stats['severed_slides'] = len(slides)
+            severed = severed - slides
         reached -= severed
         print(f"    slab-crack lines: {n_before} -> {len(reached)} clusters {sc_stats}")
 

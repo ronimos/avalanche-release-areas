@@ -113,7 +113,12 @@ FACET_STRENGTH_FACTOR = 0.5
 # the release / 0.52 outside, against 0.50 / 1.00 by primary class. The Eq. 20 arrest reads the plain sigma_t
 # column, which has no knockdown, so this moves sigma_t_mean/_wl/_ligament
 # (and A_ca_* built on them), the energy mode and the slab tensile gate.
-FACET_SOURCE = 'grain_class'
+# 2026-11-13 (Ron, both repos): 'grain_class_primary' is the default. The mixed
+# RG/FC forms keep RG strength: they are 51% of the top 0.45 m of the Jan 18
+# release slab (pure RG 6%), so the secondary rule knocked the shallow slab
+# down as if it were facets (S_t 0.44x a uniformly thinned slab; 1.00x with the
+# primary rule). Start-zone median f 0.97 -> 0.79.
+FACET_SOURCE = 'grain_class_primary'
 FACETED_GRAIN_CLASSES = (4, 5, 9)
 MIXED_PRIMARY_CLASSES = (1, 2, 3)
 
@@ -234,7 +239,7 @@ TOUGHNESS_A_FRAC = 0.5
 # -----------------------------------------------------------------------
 MIN_TAU_G          = 40.0   # Pa; minimum gravitational driving shear stress
 MAX_SK38           = 1.0    # Sk38 must be below this to count as unstable
-MIN_SLAB_THICKNESS = 0.5    # m
+MIN_SLAB_THICKNESS = 0.3    # m; 0.5 until 2026-11-13 (Ron, both repos): Jan 18 failed at ~0.45 m
 # m; the deepest slab explosive control is expected to trigger at the basal
 # WL. This is an operational choice, not a physical result, and it binds hard.
 # Sk38 at the WL falls almost monotonically with slab thickness (Spearman
@@ -265,7 +270,7 @@ D_CAP_DEFAULT_M = 50.0   # m
 # arrest a cluster whose tau_g / wl_shear_strength is below it. Dimensionless,
 # unlike TAU_G_ABS_FLOOR. avachain sets it per slope via [calibration].
 TAU_RATIO_FLOOR       = 0.0
-MIN_PROPAGATION_SLAB  = 0.50   # m; thin-slab arrest threshold
+MIN_PROPAGATION_SLAB  = 0.30   # m; thin-slab arrest threshold (0.50 until 2026-11-13, Ron: Jan 18 failed at ~0.45 m)
 MIN_PROPAGATION_LAMBDA = 0.1   # m; compliant-slab arrest threshold
 # Λ continuity thresholds, along-slope (mode II: upslope + downslope).
 LAMBDA_DROP_FACTOR    = 0.20   # fractional softening arrest threshold
@@ -457,6 +462,19 @@ USE_DISTANCE_CAPS = True
 USE_SLAB_CRACK_LINES = True
 SLAB_CRACK_BAND_M    = 5.0     # m; half-width of the strip that sets L and W
 SLAB_CRACK_ALIGN_COS = 0.707   # a line step must lie within 45 deg of the line
+
+# Severed slab slides (Ron, 2026-11-13; both repos, same as ~/avachain). The
+# crack lines above drop every piece they cut off from the trigger. But the
+# weak layer under that piece has already fractured (the BFS reached it), so
+# once the slab breaks around it nothing holds it but crack-face friction. With
+# this on, a severed piece (connected in the BFS graph) stays in the release
+# when its mean cluster slope exceeds atan(SEVERED_SLIDE_MU); only a piece on
+# gentler ground is dropped. 0.62 is the crack-face friction where slabs came
+# to rest, van Herwijnen & Heierli 2009 GRL (31.8 deg). On a 0.45 m Jan 18 slab
+# one line across the neck at the trigger otherwise dropped ~410 of ~650
+# reached clusters at facet_a 0.5 and none at 0.6 (a knife edge).
+USE_SEVERED_SLIDE = True
+SEVERED_SLIDE_MU  = 0.62
 
 # -----------------------------------------------------------------------
 # Path-energy arrest (energy_path.py) — hypothesis, see methods §3

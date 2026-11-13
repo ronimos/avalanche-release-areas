@@ -169,9 +169,10 @@ class TestFacetSource:
             'grain_type': np.array([330.0, 990.0]),
         }.items()}
 
-    def test_default_is_grain_class(self):
+    def test_default_is_grain_class_primary(self):
+        # 2026-11-13 (Ron, both repos): RG/FC keeps RG strength
         from release_areas import config
-        assert config.FACET_SOURCE == 'grain_class'
+        assert config.FACET_SOURCE == 'grain_class_primary'
 
     def test_grain_type_reaches_the_aggregation(self, monkeypatch):
         from release_areas import config, snowpack_features as sf
