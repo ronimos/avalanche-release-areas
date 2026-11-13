@@ -15,7 +15,9 @@ Figures marked "JGR" are reproduced from Meloche et al. (2025), *JGR Earth Surfa
 
 ![Release-area model flow: features, trigger selection, the crack-propagation BFS with its arrest gates, slab-crack lines and the polygon](figures/release_model_flow.png)
 
-The default chain as of 2026-11-10. Trigger selection is §5 ("Trigger
+The default chain as of 2026-11-13 (severed-slab slides, primary-class facet
+rule, 0.3 m slab floors; threshold-sum weak layer available but off).
+Trigger selection is §5 ("Trigger
 cluster selection"). The BFS gates are §5 ("What the BFS actually arrests
 on"), and the slab tensile gate, trigger toughness, τg/τp floor and slab-crack
 lines are their own §5 sections. Two stages are relative: elevation and Π₁
@@ -588,11 +590,20 @@ f comes from `config.FACET_SOURCE`:
 
 | `FACET_SOURCE` | f = 1 when | Notes |
 |---|---|---|
-| `'grain_class'` (default since 2026-10-27) | primary class FC, DH or FCxr; or primary PP/DF/RG with a faceted secondary (e.g. SNOWPACK code 341) | J&J 1990's group II is "layers of faceted grains and of layers of grains which showed both faceting and rounding", so mixed forms count (`facetedness_grain_class`) |
-| `'grain_class_primary'` | primary class FC, DH or FCxr only | drops the mixed-form rule |
+| `'grain_class'` (default 2026-10-27 → 11-13) | primary class FC, DH or FCxr; or primary PP/DF/RG with a faceted secondary (e.g. SNOWPACK code 341) | J&J 1990's group II is "layers of faceted grains and of layers of grains which showed both faceting and rounding", so mixed forms count (`facetedness_grain_class`) |
+| `'grain_class_primary'` (default since 2026-11-13, Ron) | primary class FC, DH or FCxr only | drops the mixed-form rule; see below |
 | `'sphericity'` | f = 1 − sphericity for non-dendritic layers, 0 otherwise | every CSV before 2026-10-27 |
 
 f is 0 otherwise. SNOWPACK grain codes are 100·F1 + 10·F2 + marker.
+
+**Why the primary rule since 2026-11-13.** In the Jan 18 release the top
+0.45 m of the slab is 51% RG with a faceted secondary (RG/FC) and 6% pure RG,
+at 238 kg m⁻³ (the basal slab averages 316). Under `'grain_class'` those mixed
+grains took the full knockdown, so the slab tensile support S_t of a real
+0.45 m slab was 0.44× that of the basal slab scaled to 0.45 m. Under
+`'grain_class_primary'` the ratio is 1.00×. In the mixed forms rounding
+dominates (primary class), so the knockdown follows the primary class. The
+start-zone median f moves from 0.97 to 0.79.
 
 Why grain class: J&J's knockdown is a grain-class result, and sphericity put
 rounded layers at f ≈ 0.14 (RG sits near sphericity 0.86) and many FCxr layers
@@ -818,8 +829,54 @@ The start zone is partitioned into spatial clusters via a pre-computed raster (`
 
 Profiles whose weak layer is buried shallower than `min_depth_cm` (10 cm in the
 worked example) are returned without slab/WL features. On the Jan 18 data this
-affects 2 of 3 542 clusters, all of which the 0.5 m slab-thickness filter
-removes anyway.
+affects 2 of 3 542 clusters, all of which the slab-thickness filter
+(0.5 m then, 0.3 m since 2026-11-13) removes anyway.
+
+### Weak-layer selection (`WL_SELECTION`, default `'basal'`)
+
+`'basal'` is the split above. `'threshold_sum'` (added 2026-11-12) picks the
+interface with the most threshold-sum "lemons" (Schweizer & Jamieson 2007,
+Table 3; `TSA_*` in `config`): grain-size difference ≥ 0.75 mm, hand-hardness
+difference ≥ 1.7, depth 0.18–0.94 m, persistent WL class (FC, DH, SH, FCxr),
+WL grain size ≥ 1.25 mm, WL hand hardness ≤ 1.3. Basal stays the default
+because the forecast cares about the larger avalanches (Ron, 2026-11-12).
+
+On Jan 18 the threshold-sum layer puts the release slab at 0.47 m median
+(0.39–0.61), against 0.44 m from the surveys and 1.40 m on the basal layer.
+It still **cannot be calibrated** (2026-11-13):
+
+![Jan 18: slab thickness above the basal and the threshold-sum weak layer, and S_t on the threshold-sum layer](figures/wl_threshold_sum_st_20260118.png)
+
+*Left and middle: slab thickness by weak layer. Right: log10 S_t on the
+threshold-sum layer, red where the slab breaks. Red outline: survey polygon.
+Dashed: a forced shot inside the release (cluster 3335, a = 0.6, C = 0.2).
+Stars: model triggers on the threshold-sum layer.*
+
+| Weak layer, area | h (m) | r_c (m) | σt (Pa) | S_t median | share S_t < 1 |
+|---|---|---|---|---|---|
+| threshold sum, release | 0.47 | 0.53 | 2 683 | 0.62 | 71% |
+| threshold sum, rest of start zone | 0.62 | 0.59 | 2 443 | 0.51 | 82% |
+| basal, release | 1.40 | 0.23 | 4 885 | 12.2 | 2% |
+| basal, rest of start zone | 0.91 | 0.48 | 1 729 | 0.72 | 56% |
+
+SNOWPACK's r_c on the shallow layer is 2.3× the basal one in the release, and
+S_t ∝ 1/r_c², so the BFS tensile gate breaks the slab over most of the
+release. Everything tried jumps between ~300–800 m² and ~13 000 m² (the
+latter covering 45 of 46 ski points):
+
+- `FACET_STRENGTH_FACTOR` 0.1–0.9 × `TAU_RATIO_FLOOR` 0–0.65: ~270 m² per
+  trigger. `C_FIT` 0.09–1.0: 300–800 m². Meloche arrest off: 3 700 m²
+  union, IoU 0.13.
+- The BFS gate with the trigger's r_c, at the trigger only, or with an S_t
+  threshold of 0.5 / 0.3 / 0.1: ≤ 560 m² or ~13 200 m², nothing between.
+- Gate at the trigger only plus a `TAU_RATIO_FLOOR` sweep 0.20–0.65: the
+  window is 0.31–0.32 (4.7–4.8k m², IoU 0.56) once the published part must
+  hold the trigger, and none with pixel-adjacency links (§5, "BFS links and
+  the published part").
+
+τg/τp is 0.50 in the release and 0.48 in the rest of the start zone, too
+little contrast to bound a release. A forced shot inside the release gives at
+most 780 m², running downslope out of it.
 
 ### Spatial shear gradient θ (`compute_meloche_features`)
 
@@ -958,7 +1015,7 @@ default Jan 18 run on the current reference CSVs (§6).
 |---|---|---|---|
 | 0 | it overlaps the start-zone KML and has a features row | spatial | 1608 |
 | 1 | τg ≥ 40 Pa (`MIN_TAU_G`) **and** ψ ≥ `STAUCHWALL_DEG` + 2° (= 31°) **and** Sk38 < 1.0 (`MAX_SK38`) | absolute | 197 |
-| 2 | 0.5 m ≤ h ≤ `max_slab_thickness` (2.0 m), **or h is missing** | absolute | 164 |
+| 2 | 0.3 m ≤ h ≤ `max_slab_thickness` (2.0 m), **or h is missing** (0.5 m until 2026-11-13) | absolute | 164 |
 | 2b | **not** S_t < 1 (on by default since 2026-10-27; legacy arrest mode only); since 2026-11-10 σt here is capped by the trigger toughness K_Ic/(1.122√(πh/2)) | absolute | 164 (before the toughness cap) |
 | 3 | elevation ≥ the 50th percentile of the survivors' elevations | **relative** | 82 |
 | 4 | Π₁ ≥ the median Π₁ of the survivors | **relative** | 41 |
@@ -1058,7 +1115,7 @@ propagation, in evaluation order:
 | Slab tensile failure (S_t < 1) | `USE_SLAB_TENSILE_GATE`, `SLAB_TENSILE_SIGMA_COL` | on since 2026-10-27 |
 | Load below a fraction of WL strength (τg/τp) | `TAU_RATIO_FLOOR` | 0 = off; avachain's Little Professor calibration sets 0.65 |
 | Absolute driving-stress floor | `TAU_G_ABS_FLOOR` | **350 Pa** |
-| Thin slab | `MIN_PROPAGATION_SLAB` | 0.50 m |
+| Thin slab | `MIN_PROPAGATION_SLAB` | 0.30 m (0.50 m until 2026-11-13) |
 | Compliant slab | `MIN_PROPAGATION_LAMBDA` | 0.1 m |
 | Λ discontinuity, drop / rise | `LAMBDA_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
 | Thickness discontinuity, drop / rise | `THICKNESS_DROP/RISE_FACTOR` × size_factor | 0.20 / 0.30 |
@@ -1308,6 +1365,67 @@ uses the region already admitted, which assumes the whole region has
 detached. Mode III (the collapse step at the flank) is not represented.
 The gain on Jan 18 is modest (IoU +0.009, AUC +0.05) and comes from one event.
 
+### Severed slab slides (`USE_SEVERED_SLIDE`, on since 2026-11-13)
+
+The cut above removes every piece the slab-crack lines sever from the
+trigger. But a severed piece is part of the same fractured slab: it is
+detached from its bed and loses its support across the crack. It slides
+when gravity beats the friction of the fractured weak layer.
+`severed_slides` splits the severed set into connected pieces (by the BFS
+graph) and keeps a piece in the release when its mean cluster slope exceeds
+atan μ, with μ = `SEVERED_SLIDE_MU` = 0.62 (31.8°). That is the crack-face
+friction at which slabs came to rest after weak-layer fracture in van
+Herwijnen & Heierli (2009). Only a gentler piece is removed. The test uses the
+mean, not the maximum, slope of the piece, so a steep edge cannot carry a
+gentle piece.
+
+Why: on a 0.45 m slab (the basal slab scaled to the surveyed depth) the lines
+severed ~410 clusters at the neck of the release, and the area jumped between
+~650 and ~7 800 m² as the facet knockdown a moved. With slides the area falls
+smoothly as a rises:
+
+| a | 0.75 | 0.6 | 0.5 | 0.4 | ≤ 0.3 |
+|---|---|---|---|---|---|
+| Median area (m²) | 4 653 | 5 785 | 6 412 | 6 738 | ~6 700 |
+| Ski points inside | 0 | 0 | 0 | 1 | 4–5 |
+
+On avachain's calibration 2026-11-10.3 it changes one trigger (565,
+5 692 → 7 292 m²). The rule adds one constant, taken from the literature, not
+fitted.
+
+### BFS links and the published part (avachain experiments, deferred)
+
+The BFS graph links each cluster to its `BFS_K_NEIGHBOURS` = 8 nearest
+centroids. Those links need not share a pixel edge, so a crack can reach a
+cluster beyond one it arrested in, and the rasterised region can fall apart
+into pieces. `make_release_polygon` then keeps the largest piece. Two
+switches were tried in avachain on 2026-11-13 (`BFS_ADJACENCY = 'knn' |
+'pixel'`, `POLYGON_PIECE = 'largest' | 'trigger'`); both stay at the
+behaviour of this repository, which has neither switch.
+
+![avachain calibration 2026-11-10.3 on Jan 18: polygons per trigger with k-NN and pixel-adjacency links](figures/bfs_links_knn_vs_pixel_20260118.png)
+
+*avachain `dev` plus only pixel links. Blue: k-NN links (as calibrated).
+Orange: pixel links. Bottom right: change in the weighted release
+probability. Red: survey polygon. White dots: ski points.*
+
+- **On calibration .3** the trigger is in the largest piece for all five
+  triggers (19–289 px dropped, IoU change ≤ 0.02). Pixel links, though, move
+  expected IoU 0.610 → 0.463 and expected area 6 831 → 4 865 m² (AUC
+  0.848 → 0.825; ski points 0/46 in both). 1772 and 37 barely move, 565 loses
+  its lobe toward the skied slope, 6402 loses its eastern third, and 1387
+  falls from 7 329 to 869 m² (150 clusters admitted instead of 735). The
+  calibrated size leans on links that skip arrested clusters.
+- **On the threshold-sum layer** at τg/τp floor 0.35, the largest piece
+  (3 897 m²) did not hold the trigger; the trigger's piece (371–405 m²) was
+  dropped. Ten neck clusters with τg/τp 0.321–0.329 split the release, and the
+  k-NN links carried the BFS across them.
+
+Ron, 2026-11-13: keep k-NN links and the largest piece for operations this
+season; take up pixel links together with the trigger-piece rule at the next
+recalibration, where they need a refit. Porting them here belongs with that
+change.
+
 ### Stauchwall (`STAUCHWALL_DEG` = 29° since 2026-10-27)
 
 Downslope growth stops at a cluster whose **mean** slope is below
@@ -1518,9 +1636,11 @@ margin — see §8 item 5.
 
 ![Release zone scenarios vs observed crown, Jan 18 2026, standalone defaults. Red: the 6 934 m² mapped crown. Coloured outlines: three modelled scenarios. Stars mark trigger cluster centroids.](figures/release_comparison_20260118.png)
 
-*Standalone, shipped defaults, regenerated 2026-11-10 with the command below:
-the reference CSVs of the 2026-10-27 rebuild, three triggers, and every
-11-10 change at its default. That means trigger toughness on, slab-crack
+*Standalone, shipped defaults, regenerated 2026-11-13 with the command below
+(unchanged from the 11-10 version: the 11-13 defaults move no trigger or area
+here, because the reference CSVs carry σt from before the facet-rule change and
+no slab crack severs anything): the reference CSVs of the 2026-10-27 rebuild,
+three triggers, and every 11-10 change at its default. That means trigger toughness on, slab-crack
 lines on, distance caps **on**, `TAU_RATIO_FLOOR` = 0 and facet knockdown
 a = 0.5. Triggers 1772 / 4300 / 2375, areas 612 / 1 576 / 1 268 m², best IoU
 0.093. The red outline is the 6 934 m² mapped crown that ships in this repo's
@@ -1546,6 +1666,16 @@ polygon (red, 5 810 m²). Expected IoU 0.610, expected area 6 831 m², AUC 0.848
 calibration target (avachain `docs/release_area_geometry.md` §6–7). The two
 figures differ in calibration, feature CSVs, trigger count and target
 polygon, not in code.*
+
+![Jan 18 2026 in avachain, calibration 2026-11-10.3 with the 2026-11-13 defaults: five trigger polygons against the 5 810 m² survey polygon](figures/release_comparison_20260118_avachain_thin.png)
+
+*The same calibration .3 TOML with the 2026-11-13 defaults (severed slides,
+primary-class facet rule, 0.3 m floors; basal weak layer, k-NN links) and
+features regenerated: the same five triggers, areas 6 574 / 6 919 / 7 547 /
+6 897 / 7 573 m², expected IoU 0.626, expected area 7 098 m², AUC 0.838, ski
+points 0/46. The release still sits on the basal layer (mean depth 1.03 m),
+so the 0.3 m floors do not bind on Jan 18. The calibration knobs were not
+refitted.*
 
 To reproduce:
 
@@ -1763,6 +1893,17 @@ sections above; these are what remain open.
     Scoring is in avachain's `event_scoring.py`: scenario weights summed per
     pixel give P(pixel in release | release), scored by Brier and AUC on event
     days and by predicted area on no-event days.
+11. **Shallow slabs come out wide, not narrow** (2026-11-13). In the field a
+    shallow slab tends to give a narrower avalanche (Ron). In the model only the
+    slab tensile gate links depth to width, and on the threshold-sum layer it
+    breaks the slab almost everywhere because r_c is large there (§4,
+    "Weak-layer selection"). The gate applies an initiation criterion, with
+    each cluster's own r_c, to a crack that is already running. A
+    propagation-scale tensile load is the open physics item. The
+    threshold-sum layer stays off until then.
+12. **BFS links jump arrested clusters** (§5, "BFS links and the published
+    part"). Pixel-adjacency links and the trigger-piece rule wait for the next
+    recalibration.
 
 ## 9. References
 
@@ -1784,6 +1925,8 @@ sections above; these are what remain open.
 - Kirchner, H. O. K., Michot, G., & Schweizer, J. (2000). Fracture toughness of snow in tension. *Philosophical Magazine A*, 80(5). — the `kirchner2000` lower bound.
 - Jamieson, J. B., & Johnston, C. D. (1998). Refinements to the stability index for skier-triggered dry-slab avalanches. *Annals of Glaciology*, 26, 296–302. — the skier stability index Sk38 that ranks triggers (§5).
 - Jamieson, J. B., & Johnston, C. D. (1990). In-situ tensile tests of snowpack layers. *Journal of Glaciology*, 36(122), 102–106. — basis for the facet tensile knockdown `FACET_STRENGTH_FACTOR`, the grain-class grouping of `FACET_SOURCE = 'grain_class'` (group II), and σt = 79.7 (ρ/917)^2.39 kPa in `sigma_t_mean__jamieson1990`.
+- Schweizer, J., & Jamieson, J. B. (2007). A threshold sum approach to stability evaluation of manual snow profiles. *Cold Regions Science and Technology*, 47, 50–59. — the lemons behind `WL_SELECTION = 'threshold_sum'`.
+- van Herwijnen, A., & Heierli, J. (2009). Measurement of crack-face friction in collapsed weak snow layers. *Geophysical Research Letters*, 36, L23502. — μ = 0.62 behind `SEVERED_SLIDE_MU`.
 - Schweizer, J., Reuter, B., van Herwijnen, A., Gauthier, D., & Jamieson, B. (2014). On how the tensile strength of the slab affects crack propagation propensity. *Proc. ISSW 2014*, Banff. — Eq. 1, the cantilever stress 3ρg r_c²/h behind the slab tensile gate S_t.
 - Reuter, B., & Schweizer, J. (2018). Describing snow instability by failure initiation, crack propagation, and slab tensile support. *Geophysical Research Letters*, 45, 7019–7027. — the finite-element successor to the 2014 closed form; not implemented.
 - Reiweger, I., Schweizer, J., Ernst, J. D., & Dual, J. (2010). Load-controlled test apparatus for snow. *Cold Regions Science and Technology*, 62, 119–125. — candidate source for `config.G_WL` = 0.2 MPa; Meloche et al. (2025) Table 1 / p.7 reportedly attribute that value to cold-lab shear tests by "Reiweger et al. (2010)," and this is the best-matching candidate (multi-author, shear-apparatus paper) among that year's Reiweger publications, but **the attribution is not independently confirmed** — see §4 and §6. Verify against the published Meloche (2025) PDF before citing this as settled.
