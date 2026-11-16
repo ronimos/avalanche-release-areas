@@ -233,6 +233,11 @@ def main():
                     help='run slab cracks started by the tensile gate as crown/flank '
                          'lines and cut off the area they sever '
                          f'(default: {config.USE_SLAB_CRACK_LINES}).')
+    ap.add_argument('--downslope-slide', action=argparse.BooleanOptionalAction,
+                    default=config.USE_DOWNSLOPE_SLIDE,
+                    help='drop fractured clusters the slab does not slide over: gentle '
+                         'ground (< atan mu) that the push from above does not reach '
+                         f'(default: {config.USE_DOWNSLOPE_SLIDE}).')
     ap.add_argument('--slab-crack-mode', choices=config.SLAB_CRACK_MODES,
                     default=config.SLAB_CRACK_MODE,
                     help="fracture mode of the slab-crack lines: 'opening' (Mode I, "
@@ -267,6 +272,7 @@ def main():
     config.USE_DISTANCE_CAPS = args.distance_caps
     config.USE_SLAB_CRACK_LINES = args.slab_crack_lines
     config.SLAB_CRACK_MODE = args.slab_crack_mode
+    config.USE_DOWNSLOPE_SLIDE = args.downslope_slide
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)

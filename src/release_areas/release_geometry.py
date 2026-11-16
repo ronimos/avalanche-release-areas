@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 from release_areas import config
-from release_areas.arrest_indices import (arrest_length, slab_tensile_support,
+from release_areas.arrest_indices import (G_ACC, arrest_length, slab_tensile_support,
                                           toughness_limited_strength)
 
 # Re-exported for backwards compatibility; config is the source of truth.
@@ -666,6 +666,74 @@ def severed_slides(severed, neighbours, slope_of, mu=None) -> set:
         if np.mean([slope_of(c) for c in comp]) > lim:
             slides |= comp
     return slides
+
+
+def downslope_held(region, neighbours, centroids, props, slope_of, elev_of,
+                   area_of, fall_of, mu=None, align_cos=None):
+    """Clusters of `region` the slab does not slide over (USE_DOWNSLOPE_SLIDE):
+    returns (held, stats). Same as ~/avachain.
+
+    Each cluster's net drive N = rho g h A / cos th (sin th - mu cos th) (h
+    slope-normal, A planimetric) is routed down its own fall line, highest
+    cluster first: P = N + inflow, and P is split among the lower neighbours
+    in `region` within align_cos of the fall line, in proportion to the
+    alignment. A cluster with no such neighbour passes nothing on. A cluster
+    with P <= 0 is held and passes nothing on. A cluster without finite slab
+    density and thickness has N = 0 and passes its inflow on.
+
+    region    : clusters after the crack lines and severed slides
+    neighbours: {cid: [cid, ...]} BFS graph (made symmetric here)
+    centroids, fall_of : {cid: (x, y)}, {cid: unit downslope (east, north)},
+                map frame; a cluster missing from fall_of passes nothing on
+    props     : {cid: {'slab_density', 'slab_thickness'}}
+    slope_of  : cid -> mean slope (deg);  elev_of, area_of : {cid: m}, {cid: m2}
+    The result does not depend on the order of region or neighbours (ties in
+    elevation are broken by cluster id).
+    """
+    mu = config.SEVERED_SLIDE_MU if mu is None else mu
+    align_cos = config.DOWNSLOPE_ALIGN_COS if align_cos is None else align_cos
+    region = set(region)
+    adj = {}
+    for c, nb in neighbours.items():
+        for u in nb:
+            if c in region and u in region:
+                adj.setdefault(c, set()).add(u); adj.setdefault(u, set()).add(c)
+    order = sorted(region, key=lambda c: (-elev_of[c], c))
+    rank = {c: i for i, c in enumerate(order)}
+    inflow = {c: 0.0 for c in region}
+    held = set()
+    for c in order:
+        p = props.get(c, {})
+        rho, h = p.get('slab_density', np.nan), p.get('slab_thickness', np.nan)
+        th = np.radians(slope_of(c))
+        n_c = 0.0
+        if np.isfinite(rho) and np.isfinite(h) and h > 0:
+            n_c = (rho * G_ACC * h * area_of[c] / np.cos(th)
+                   * (np.sin(th) - mu * np.cos(th)))
+        P = n_c + inflow[c]
+        if P <= 0:
+            held.add(c)
+            continue
+        f = fall_of.get(c)
+        if f is None:
+            continue
+        x0, y0 = centroids[c]
+        tgt = []
+        for u in sorted(adj.get(c, ())):
+            if rank[u] < rank[c]:
+                continue                      # only clusters processed after c
+            dx, dy = centroids[u][0] - x0, centroids[u][1] - y0
+            d = float(np.hypot(dx, dy))
+            if d < 1e-9:
+                continue
+            cosv = (dx * f[0] + dy * f[1]) / d
+            if cosv >= align_cos:
+                tgt.append((u, cosv))
+        tot = sum(w for _, w in tgt)
+        for u, w in tgt:
+            inflow[u] += P * w / tot
+    lim = np.degrees(np.arctan(mu))
+    return held, {'gentle': int(sum(slope_of(c) < lim for c in region)), 'held': len(held)}
 
 
 def cluster_fall_vector(rows, cols, slope_grid, aspect_grid):
@@ -1305,6 +1373,26 @@ def propagate_crack(
             severed = severed - slides
         reached -= severed
         print(f"    slab-crack lines ({config.SLAB_CRACK_MODE}): {n_before} -> {len(reached)} clusters {sc_stats}")
+
+    # Downslope slide test: drop the fractured clusters the slab does not
+    # slide over (config.USE_DOWNSLOPE_SLIDE).
+    if config.USE_DOWNSLOPE_SLIDE and len(reached) > 1:
+        n_before = len(reached)
+        elev_of, area_of, fall_of = {}, {}, {}
+        for c in reached:
+            px = pixel_index.get(c)
+            if px is None:
+                elev_of[c], area_of[c] = np.inf, 0.0
+                continue
+            elev_of[c] = float(np.nanmean(dem[px[0], px[1]]))
+            area_of[c] = len(px[0]) * px_m * px_m
+            v = cluster_fall_vector(px[0], px[1], slope_grid, aspect_grid)
+            if v is not None:
+                fall_of[c] = v
+        held, dh_stats = downslope_held(reached, neighbours, centroids, cluster_props,
+                                        _mean_slope, elev_of, area_of, fall_of)
+        reached -= held
+        print(f"    downslope slide: {n_before} -> {len(reached)} clusters {dh_stats}")
 
     dir_counts = {'upslope': 0, 'downslope': 0, 'lateral': 0, 'other': 0}
     for cid in reached:

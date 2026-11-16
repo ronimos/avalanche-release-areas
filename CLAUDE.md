@@ -50,6 +50,14 @@ with this block, this block wins.
   `test_slab_crack_lines.py` tells them apart. avachain's calibrated slopes
   pin `'shear'` until their next recalibration. Methods doc § Running slab
   cracks.
+- **2026-11-16 (Ron, both repos):** `USE_DOWNSLOPE_SLIDE` (default **off**, CLI
+  `--[no-]downslope-slide`). After the crack lines, the net slab drive is
+  routed down each cluster's own fall line. Gentle ground (< atan μ = 31.8°)
+  that the push from above does not reach is dropped. It uses no new free
+  parameter (μ is the severed-slide friction; one 45° routing tolerance). Here,
+  Jan 18 trigger 2375 goes 1 268 → 1 121 m², the others are unchanged.
+  avachain: five-trigger E[IoU] 0.626 → 0.663 (shear). It waits for the next
+  recalibration. Methods doc § Downslope slide test.
 - **Reference CSVs** come from avachain's 2026-10-27 forcing rebuild. That
   rebuild removed 21 false avalanche corrections from the forcing (Ron: Jan 18
   is the only avalanche of the season) and aligned the reinit time.

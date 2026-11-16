@@ -1449,6 +1449,69 @@ On avachain's calibration 2026-11-10.3 it changes one trigger (565,
 5 692 → 7 292 m²). The rule adds one constant, taken from the literature, not
 fitted.
 
+### Downslope slide test (`USE_DOWNSLOPE_SLIDE`, 2026-11-16, default off)
+
+**Why.** The only downslope arrest was an angle: a cluster whose mean slope is
+below the Stauchwall angle (29°) stops the BFS. On Jan 18, every polygon
+overshot the survey polygon in the same places: a strip along the lower
+boundary and a lobe below the south-east corner. Both are on 29–31.8° ground.
+But 27% of the observed release is on that band too, half of its lowest
+quarter along the fall line. So no angle threshold separates them. The real
+slab slid over ground where it could not slide on its own, because the slab
+above pushed it.
+
+**Model.** The BFS region is where the weak layer fractured. A weak-layer
+crack also runs onto low-angle ground (whumpfs on the flat). The release is
+where the slab slides. A fractured element slides on its own only above
+atan μ = 31.8° (μ = `SEVERED_SLIDE_MU`, the crack-face friction of
+van Herwijnen & Heierli 2009). Below that, it moves only if pushed.
+`downslope_held` runs after the crack lines and severed slides:
+
+- Each cluster's net drive is N = ρ g h A / cos θ (sin θ − μ cos θ), with h
+  slope-normal and A planimetric.
+- It is routed down the cluster's own fall line (`cluster_fall_vector`, map
+  frame) to lower neighbours within 45° (`DOWNSLOPE_ALIGN_COS`), split by
+  alignment, highest cluster first.
+- P = N + inflow. A cluster with P ≤ 0 is held and removed, and passes
+  nothing on.
+- Steep ground always has P > 0, so only gentle ground is affected. The 29°
+  Stauchwall stays as the floor.
+
+There is no new free parameter. It generalises the severed-slide rule: a
+severed piece gets no push across its cut.
+
+**Not modelled: a compression cap.** The push stress at the observed bottom
+is ~4 kPa (p90 13 kPa), the order of the slab's tensile strength. A slab that
+crushes under the push would put the Stauchwall higher. No relation for
+compressive strength against density has been sourced, so this is open.
+
+**Results, avachain, calibration 2026-11-13.1 knobs** (a sensitivity check,
+not a fit; knobs fitted with the test off):
+
+| | shear, off | shear, on | opening, off | opening, on |
+|---|---|---|---|---|
+| Five-trigger E[IoU] | 0.626 | 0.663 | 0.631 | 0.661 |
+| E[area] (m²) | 7 098 | 6 607 | 7 071 | 6 654 |
+| AUC | 0.838 | 0.856 | 0.824 | 0.842 |
+| Brier skill | 0.244 | 0.341 | 0.227 | 0.312 |
+| Inside-release triggers, median IoU (n = 536) | 0.643 | 0.669 | 0.605 | 0.651 |
+| Inside-release, median area (m²) | 6 917 | 6 579 | 7 410 | 6 788 |
+| Ski non-triggers releasing | 0/46 | 0/46 | 0/46 | 0/46 |
+
+The gentle ground of the observed release is pushed in 97% of cases, against
+51% for the gentle ground of the overshoot (pre-check, 15 triggers × 2 modes).
+The difference between the crack modes shrinks from 0.038 to 0.018 in
+inside-release median IoU. That difference was mostly the south-east lobe,
+which shear flank lines cut off as a side effect. The part of the lobe still
+released in opening mode is pushed by steep ground directly above it. In this
+repo's default Jan 18 run, trigger 2375 loses 8 clusters (1 268 → 1 121 m²).
+Unit tests on a synthetic bench pin the carried length exactly
+(`tests/test_downslope_slide.py`).
+
+**Limits.** h in N is taken as slope-normal. The push runs only along knn
+links within 45° of the fall line, and a cluster with no such neighbour loses
+its push. Jan 18 is the only event, and these numbers are calibration data.
+
 ### BFS links and the published part (avachain experiments, deferred)
 
 The BFS graph links each cluster to its `BFS_K_NEIGHBOURS` = 8 nearest
