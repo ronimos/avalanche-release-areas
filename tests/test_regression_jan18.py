@@ -88,3 +88,13 @@ def test_gate_off_restores_the_ungated_areas(default_summary, tmp_path):
         assert s.loc[trig, 'release_area_m2'] == pytest.approx(area, abs=1.0)
         assert s.loc[trig, 'iou'] == pytest.approx(iou, abs=1e-3)
         assert s.loc[trig, 'release_area_m2'] > on.loc[trig, 'release_area_m2']
+
+
+def test_shear_crack_mode_gives_the_same_polygons(default_summary, tmp_path):
+    """SLAB_CRACK_MODE 'opening' became the default on 2026-11-16 without a
+    re-pin: on this run shear flank lines form (7 and 2 clusters on 4300 and
+    2375) but sever nothing, and opening runs 0 and 2, so the polygons are the
+    same. Jan 18 here cannot tell the modes apart; the unit tests in
+    test_slab_crack_lines.py do."""
+    s = _run(tmp_path, '--slab-crack-mode', 'shear')
+    pd.testing.assert_frame_equal(s, default_summary)

@@ -1365,6 +1365,62 @@ uses the region already admitted, which assumes the whole region has
 detached. Mode III (the collapse step at the flank) is not represented.
 The gain on Jan 18 is modest (IoU +0.009, AUC +0.05) and comes from one event.
 
+#### Fracture mode of the lines (`SLAB_CRACK_MODE`, 2026-11-16)
+
+The lines above load a flank in in-plane shear: the detached slab slides
+past the attached slab along the trigger's fall line (Mode II). Two arguments
+favour opening (Mode I) instead (Ron, 2026-11-16):
+
+- A brittle slab does not extend a crack in pure shear. The
+  maximum-tangential-stress criterion (Erdogan & Sih) kinks it ~70° into
+  tension. Shear across a flank therefore grows stepped, en-echelon tension
+  cracks, which fits ragged flanks next to smooth crowns.
+- After the supershear transition (Trottet et al. 2022) the lateral (Mode III)
+  weak-layer front is slower than the downslope one. The failed region spreads
+  as a cone, and its oblique edges load the slab partly in opening.
+
+Shear still holds in one regime: a long up/down strip has already lost
+contact with the weak layer, and the crack sweeps across the slope with a
+straight front. Which regime governs is an open question, so both are
+implemented. **`'opening'` is the default.**
+
+| | `'shear'` (Mode II) | `'opening'` (Mode I) |
+|---|---|---|
+| Fall line used for the BFS crown/flank label, line steps and load test | the trigger's, everywhere | each cluster's own (`cluster_fall_vectors`: mean gradient, map frame) |
+| Crown runs while | detached slab below pulls (θ > φ) | same, across the local fall line |
+| Flank runs while | detached slab beside it pulls | that, and the fall lines on its two sides diverge: (F₊ − F₋)·ê > 0 |
+
+F± are the mean fall directions of the reached clusters within
+`SLAB_CRACK_BAND_M` on each side, and ê is the local cross axis. On a planar
+slope no opening flank runs, and the flank is where the weak-layer crack
+stopped. Flanks run along convex rolls and ribs. There is still no strength
+or toughness test, for the reason given above. Directions are cluster scale,
+so the en-echelon steps themselves are not resolved.
+
+**Results.** Jan 18, avachain, calibration 2026-11-13.1 knobs. This is a
+sensitivity check, not a fit, and the knobs were fitted under shear.
+
+| | shear | opening |
+|---|---|---|
+| E[IoU] | 0.626 | 0.631 |
+| E[area] | 7 098 m² | 7 071 m² |
+| AUC | 0.838 | 0.824 |
+| Brier skill | 0.244 | 0.227 |
+| Ski non-triggers releasing | 0/46 | 0/46 |
+| Line clusters per trigger | 81–142 | 40–69 |
+| Severed per trigger | 6–100 | 13–59 |
+
+The five triggers are the same in both modes. The ski shots stop at the
+trigger (tensile/toughness gate), before any line forms, so they cannot
+separate the modes. Opening runs half as many line clusters, mostly fewer
+flanks, and spreads the severing more evenly across triggers (1772: 100 → 13;
+1387, 6402, 565: 6–53 → 55–59). Jan 18 does not tell the modes apart. In this
+repo's default run the two are identical: shear lines form but sever nothing.
+The difference is pinned by synthetic-terrain unit tests
+(`tests/test_slab_crack_lines.py`: planar, convex roll, gully, a tilted fall
+line). avachain's calibrated slopes pin `'shear'` in `[calibration]` until the
+next recalibration.
+
 ### Severed slab slides (`USE_SEVERED_SLIDE`, on since 2026-11-13)
 
 The cut above removes every piece the slab-crack lines sever from the

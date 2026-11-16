@@ -233,6 +233,12 @@ def main():
                     help='run slab cracks started by the tensile gate as crown/flank '
                          'lines and cut off the area they sever '
                          f'(default: {config.USE_SLAB_CRACK_LINES}).')
+    ap.add_argument('--slab-crack-mode', choices=config.SLAB_CRACK_MODES,
+                    default=config.SLAB_CRACK_MODE,
+                    help="fracture mode of the slab-crack lines: 'opening' (Mode I, "
+                         'local fall lines, a flank needs the sides to pull apart) or '
+                         "'shear' (Mode II, the trigger's fall line, every release "
+                         f'before 2026-11-16; default: {config.SLAB_CRACK_MODE}).')
     ap.add_argument('--delta', type=float, default=config.DELTA,
                     help=f'Meloche softening coefficient for the BFS Eq. 20 test '
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
@@ -260,6 +266,7 @@ def main():
     config.USE_TRIGGER_TOUGHNESS = args.trigger_toughness
     config.USE_DISTANCE_CAPS = args.distance_caps
     config.USE_SLAB_CRACK_LINES = args.slab_crack_lines
+    config.SLAB_CRACK_MODE = args.slab_crack_mode
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)
