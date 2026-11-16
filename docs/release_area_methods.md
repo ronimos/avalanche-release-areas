@@ -1391,7 +1391,19 @@ implemented. **`'opening'` is the default.**
 | Flank runs while | detached slab beside it pulls | that, and the fall lines on its two sides diverge: (F₊ − F₋)·ê > 0 |
 
 F± are the mean fall directions of the reached clusters within
-`SLAB_CRACK_BAND_M` on each side, and ê is the local cross axis. On a planar
+`SLAB_CRACK_BAND_M` on each side, and ê is the local cross axis. A side whose
+row holds no reached slab is the attached slab at the release's edge. It does
+not move, so F = 0 there (2026-11-16, Ron; before, such a line did not run). An
+edge flank therefore opens where the detached slab falls away from the
+attached slab, and not on a plane or in a gully. On Jan 18 (avachain, opening,
+2026-11-13.1 knobs), more edge lines run, and the inside-release median IoU
+goes 0.605 → 0.594 (area +130 m² in about two thirds of triggers) with the
+downslope slide test off. Five-trigger E[IoU] is unchanged at 0.631. With the
+slide test on, nothing changes (0.651 / 0.661). The extra area does not come
+from the rule itself. It comes from two existing bookkeeping rules: line
+clusters stay in the release, and the slide test uses a severed piece's mean
+slope. A new line converts some severed clusters into kept boundary, and it
+splits a severed piece so that one half passes 31.8° and slides. On a planar
 slope no opening flank runs, and the flank is where the weak-layer crack
 stopped. Flanks run along convex rolls and ribs. There is still no strength
 or toughness test, for the reason given above. Directions are cluster scale,
