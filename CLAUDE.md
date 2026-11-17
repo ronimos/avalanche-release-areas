@@ -58,6 +58,13 @@ with this block, this block wins.
   Jan 18 trigger 2375 goes 1 268 → 1 121 m², the others are unchanged.
   avachain: five-trigger E[IoU] 0.626 → 0.663 (shear). It waits for the next
   recalibration. Methods doc § Downslope slide test.
+- **2026-11-16 (Ron, both repos), opening flanks:** the attached side at the
+  release's edge counts as stationary (F = 0) instead of stopping the line.
+  `USE_OPENING_TOUGHNESS = True`: an opening flank cell with K = 1.122 σ_open
+  √(π a) < K_Ic is removed after the cut. It is an extra gate, so it never
+  adds area. Crowns and shear flanks need no toughness test (K/K_Ic ≥ 30 at
+  p10 on Jan 18); opening flanks do (14% of steps below 1). Methods doc §
+  Running slab cracks.
 - **Reference CSVs** come from avachain's 2026-10-27 forcing rebuild. That
   rebuild removed 21 false avalanche corrections from the forcing (Ron: Jan 18
   is the only avalanche of the season) and aligned the reinit time.

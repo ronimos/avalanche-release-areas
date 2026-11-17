@@ -1403,7 +1403,28 @@ slide test on, nothing changes (0.651 / 0.661). The extra area does not come
 from the rule itself. It comes from two existing bookkeeping rules: line
 clusters stay in the release, and the slide test uses a severed piece's mean
 slope. A new line converts some severed clusters into kept boundary, and it
-splits a severed piece so that one half passes 31.8° and slides. On a planar
+splits a severed piece so that one half passes 31.8° and slides.
+
+**Toughness gate on opening flanks (`USE_OPENING_TOUGHNESS`, on, 2026-11-16).**
+The argument that a running line needs no toughness test (K/K_c 10–75) holds
+for crowns and shear flanks. In avachain on Jan 18, every crown and shear
+flank step had K/K_Ic ≥ 30 at p10. An opening flank carries only the opening
+part of the drive, σ_open = ρ g L (sin θ − tan φ cos θ) (F₊ − F₋)·ê / 2.
+Where the slope directions diverge by a few degrees (median 3° on Jan 18),
+that is small: 14% of opening flank steps had K = 1.122 σ_open √(π a) below
+the slab K_Ic (`K_Ic_ligament`, a = the line's length so far).
+
+At such a cell the slab cannot break, so it stays with the attached slab and
+is removed after the cut. It is an extra gate on top of the lines (Ron: "not
+instead of anything else"). The lines and the severed set are those without
+it, so it never adds area.
+
+A first version stopped the line there instead. Fewer lines then cut less,
+and the release grew by 130–160 m² on 5 of 10 triggers, so it was dropped.
+
+Results (avachain, opening, slide test on, 2026-11-13.1 knobs): 77 of 587
+inside, ski and model triggers lose area, none gains. Inside-release median
+IoU stays 0.651. The five model triggers' median area goes 6 622 → 6 570 m². On a planar
 slope no opening flank runs, and the flank is where the weak-layer crack
 stopped. Flanks run along convex rolls and ribs. There is still no strength
 or toughness test, for the reason given above. Directions are cluster scale,
