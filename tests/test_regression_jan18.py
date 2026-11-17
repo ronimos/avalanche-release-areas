@@ -98,3 +98,23 @@ def test_shear_crack_mode_gives_the_same_polygons(default_summary, tmp_path):
     test_slab_crack_lines.py do."""
     s = _run(tmp_path, '--slab-crack-mode', 'shear')
     pd.testing.assert_frame_equal(s, default_summary)
+
+
+# With --downslope-slide (off by default): 2375 loses 7 gentle clusters the
+# slab above does not push. --unified-slide changes nothing here, because no
+# line severs anything on this run (avachain's fixture pins where it does).
+DOWNSLOPE = {
+    1772: (612.0, 0.05067835270873417),
+    4300: (1576.0, 0.09318671977438513),
+    2375: (1121.0, 0.09020241102176011),
+}
+
+
+def test_downslope_slide_and_unified(tmp_path):
+    s = _run(tmp_path / 'ds', '--downslope-slide').set_index('trigger_cluster')
+    assert list(s.index) == list(DOWNSLOPE)
+    for trig, (area, iou) in DOWNSLOPE.items():
+        assert s.loc[trig, 'release_area_m2'] == pytest.approx(area, abs=1.0)
+        assert s.loc[trig, 'iou'] == pytest.approx(iou, abs=1e-3)
+    u = _run(tmp_path / 'u', '--downslope-slide', '--unified-slide')
+    pd.testing.assert_frame_equal(u.set_index('trigger_cluster'), s)

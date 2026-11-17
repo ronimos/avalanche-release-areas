@@ -58,6 +58,12 @@ with this block, this block wins.
   Jan 18 trigger 2375 goes 1 268 → 1 121 m², the others are unchanged.
   avachain: five-trigger E[IoU] 0.626 → 0.663 (shear). It waits for the next
   recalibration. Methods doc § Downslope slide test.
+- **2026-11-16 (both repos):** `UNIFIED_SLIDE = False` (CLI `--[no-]unified-slide`;
+  only with `--downslope-slide`). Severed pieces and line clusters are decided
+  by the push routing, with line clusters as push sinks, instead of the
+  mean-slope severed rule and keeping every line cluster. avachain Jan 18: the
+  release shrinks by a median 285 m² and the inside-release IoU rises slightly.
+  Here nothing is severed, so nothing changes. Methods doc § Downslope slide test.
 - **2026-11-16 (Ron, both repos), opening flanks:** the attached side at the
   release's edge counts as stationary (F = 0) instead of stopping the line.
   `USE_OPENING_TOUGHNESS = True`: an opening flank cell with K = 1.122 σ_open

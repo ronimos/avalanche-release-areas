@@ -1541,6 +1541,35 @@ repo's default Jan 18 run, trigger 2375 loses 8 clusters (1 268 → 1 121 m²).
 Unit tests on a synthetic bench pin the carried length exactly
 (`tests/test_downslope_slide.py`).
 
+**Unified slide (`UNIFIED_SLIDE`, off, 2026-11-16; needs the slide test).**
+Two cut-off rules made polygons depend on exactly where a line falls:
+- every line cluster stays in the release;
+- a severed piece slides back whole when its *mean* slope is above 31.8°.
+
+A new line could turn removed clusters into kept boundary, or split a piece
+so that one half passes. With this switch on, the lines no longer remove
+severed pieces. Every cluster is decided by the push routing, with the line
+clusters as sinks: they take push and slide on their own drive, but a slab
+crack passes no push on. A steep cluster slides. A gentle one stays only if
+the slab above, on its own side of the crack, pushes it. The trigger's side is
+not privileged. knn links can still jump a line (`BFS_ADJACENCY`).
+
+Jan 18 (avachain, 2026-11-13.1 knobs, slide test on), unified off → on:
+
+| | opening | shear |
+|---|---|---|
+| Inside-release median IoU | 0.651 → 0.654 | 0.669 → 0.675 |
+| Inside-release median area | 6 788 → 6 409 m² | 6 579 → 6 262 m² |
+| Five-trigger E[IoU] | 0.661 → 0.662 | 0.663 → 0.662 |
+| Five-trigger E[area] | 6 654 → 6 482 m² | 6 607 → 6 233 m² |
+| AUC | 0.842 → 0.850 | 0.856 → 0.850 |
+| Brier skill | 0.312 → 0.341 | 0.341 → 0.368 |
+
+Ski releases stay 0/46. Over 587 triggers, 441 lose area (median −285 m²),
+139 are unchanged, and 7 gain at most 254 m². It is a rule replacement, not a
+gate: a steep part of a severed piece with a gentle mean now slides. In this
+repo's default Jan 18 run no line severs anything, so nothing changes.
+
 **Limits.** h in N is taken as slope-normal. The push runs only along knn
 links within 45° of the fall line, and a cluster with no such neighbour loses
 its push. Jan 18 is the only event, and these numbers are calibration data.

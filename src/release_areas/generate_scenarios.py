@@ -238,6 +238,11 @@ def main():
                     help='drop fractured clusters the slab does not slide over: gentle '
                          'ground (< atan mu) that the push from above does not reach '
                          f'(default: {config.USE_DOWNSLOPE_SLIDE}).')
+    ap.add_argument('--unified-slide', action=argparse.BooleanOptionalAction,
+                    default=config.UNIFIED_SLIDE,
+                    help='with --downslope-slide: decide severed pieces and line clusters '
+                         'by the push routing (no push across a crack) instead of the '
+                         f'mean-slope rule (default: {config.UNIFIED_SLIDE}).')
     ap.add_argument('--opening-toughness', action=argparse.BooleanOptionalAction,
                     default=config.USE_OPENING_TOUGHNESS,
                     help="'opening' flanks: drop cells where the opening load cannot "
@@ -279,6 +284,7 @@ def main():
     config.SLAB_CRACK_MODE = args.slab_crack_mode
     config.USE_OPENING_TOUGHNESS = args.opening_toughness
     config.USE_DOWNSLOPE_SLIDE = args.downslope_slide
+    config.UNIFIED_SLIDE = args.unified_slide
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)
