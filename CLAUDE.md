@@ -8,6 +8,18 @@ Outputs: release polygons, scenario summaries, comparison figures.
 
 No SNOWPACK, no zarr, no NWP pipeline — just this package and its data.
 
+## avachain runs tag `ops-2026-27` this season (Ron, 2026-11-17)
+
+The operational chain (`~/avachain`, deployed at `/home/avachain`) is locked
+for the 2026-27 season on this repo's tag **`ops-2026-27` (`eef8071`)**,
+paired with avachain `ops-2026-27` (`d11bbf3`, calibration 2026-11-17.1).
+Release-model work continues here on `master`; it does **not** go to avachain
+until the lock is lifted (between seasons, or by Ron's explicit decision).
+"In step with ~/avachain" below means as of that tag. avachain's parity test
+reads `config.py` at the tag, so changing a value here breaks nothing there.
+When comparing a new result with what forecasters saw, compare against the
+tag, not `master`.
+
 ## Current state (2026-10-28) — read this before the older sections
 
 Older sections below keep their dated numbers as history. Where they disagree
