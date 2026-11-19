@@ -1,0 +1,13 @@
+{
+ "version": "2026-11-17.1",
+ "source": "avachain slopes/little_prof/slope_config.toml [calibration], tag ops-2026-27 (d11bbf3)",
+ "features_dir": "features/cal_2026-11-17.1",
+ "features_note": "facet_a 0.75 acts at feature generation; the CSVs in features_dir were made with it (avachain analyze, 2026-01-18 00:00, run 2026-11-18). The other knobs act in the release model and are applied to config by examples/score_jan18.py.",
+ "facet_a": 0.75,
+ "distance_caps": false,
+ "tau_ratio_floor": 0.65,
+ "slab_crack_mode": "shear",
+ "downslope_slide": true,
+ "unified_slide": true,
+ "n_triggers": 5
+}

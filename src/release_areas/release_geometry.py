@@ -471,7 +471,8 @@ def make_release_polygon_2d(
         max_clusters: int = None,
         pixel_index: Optional[dict] = None,
         use_propagation: bool = True,
-        state_out: Optional[dict] = None):
+        state_out: Optional[dict] = None,
+        rectangle_fallback: bool = True):
     """
     Build a 2D release polygon.
 
@@ -484,6 +485,11 @@ def make_release_polygon_2d(
         BFS cluster flood-fill with per-direction arrest criteria.
     Fallback (use_propagation=False, or propagation returns None):
         Oriented rectangle from A_ca + stauchwall + Gaume cross-slope width.
+
+    rectangle_fallback=False returns None where the BFS does not propagate,
+    instead of the oriented rectangle, and sets state_out['no_propagation'].
+    Forced shots (scoring) use it: a rectangle there is not a propagation
+    result. Ported from avachain release_geometry (ops-2026-27).
 
     Returns shapely Polygon (UTM) or None.
     """
@@ -582,8 +588,21 @@ def make_release_polygon_2d(
                 return polygon
         if energy_mode:
             return None
+        if not rectangle_fallback:
+            print(f"  propagate_crack returned None for cluster "
+                  f"{trigger_cluster_id} — no propagation")
+            if state_out is not None:
+                state_out['no_propagation'] = True
+            return None
         print(f"  propagate_crack returned None for cluster {trigger_cluster_id}"
               f" — falling back to rectangle")
+
+    if not rectangle_fallback and not energy_mode:
+        # No BFS was run (no arrest indices, or use_propagation off): there
+        # is nothing that says the crack propagates.
+        if state_out is not None:
+            state_out['no_propagation'] = True
+        return None
 
     if trigger_cluster_id not in pixel_index:
         return None
@@ -768,7 +787,8 @@ def cluster_fall_vectors(pixel_index, slope_grid, aspect_grid, cids=None) -> dic
 def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
                      fall_xy, props, slope_of, cluster_map, phi_deg=None,
                      band_m=None, align_cos=None, mode=None, fall_of=None,
-                     intact_out=None, cut_out=None):
+                     intact_out=None, cut_out=None, trace_out=None, front_ring=None,
+                     lines_out=None):
     """Run slab cracks as lines through the admitted region; return
     (clusters to remove, stats). See config.USE_SLAB_CRACK_LINES and
     config.SLAB_CRACK_MODE. Lines may cross; each line stops on its own
@@ -782,8 +802,8 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
     fall_xy   : unit downslope vector (east, north) of the trigger
     props     : {cid: {'slab_density', 'slab_thickness'}} of admitted clusters
     slope_of  : cid -> mean slope (deg)
-    mode      : 'opening' | 'shear' (default config.SLAB_CRACK_MODE)
-    fall_of   : {cid: unit downslope vector}, 'opening' only; a cluster
+    mode      : 'opening' | 'shear' | 'mixed' (default config.SLAB_CRACK_MODE)
+    fall_of   : {cid: unit downslope vector}, 'opening'/'mixed'; a cluster
                 missing from it takes fall_xy. 'shear' ignores it.
     intact_out: a set; with USE_OPENING_TOUGHNESS, 'opening' flank cells where
                 K = TOUGHNESS_EDGE_F sigma_open sqrt(pi a) < K_Ic (a = the line's
@@ -792,6 +812,17 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
                 themselves, and the severed set, are unchanged.
     cut_out   : a set; the line clusters are added (UNIFIED_SLIDE uses them as
                 push sinks).
+    trace_out : a list; one dict per flank step tested (diagnostics only,
+                changes nothing): the step, the local fall line, the relative
+                motion split and, in 'mixed', the axes, K_I, K_II, K_Ic and the
+                outcome.
+    front_ring: {cid: BFS arrival ring} of the admitted clusters, for the
+                'mixed' front axes (config.MIXED_AXES). Missing: the hop count
+                from the trigger through reached clusters, which is the ring
+                of the isotropic BFS.
+    lines_out : a list; one dict per line run (diagnostics only, changes
+                nothing): start cell, orient, sgn and the cells in the order
+                the line reached them.
     The result does not depend on the order of reached, cracks or neighbours.
     """
     from scipy import ndimage
@@ -802,6 +833,18 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
     if mode not in config.SLAB_CRACK_MODES:
         raise ValueError(f"slab crack mode {mode!r} not in {config.SLAB_CRACK_MODES}")
     opening = mode == 'opening'
+    mixed = mode == 'mixed'
+    local_fall = opening or mixed
+    if mixed:
+        if config.MIXED_CRITERION not in config.MIXED_CRITERIA:
+            raise ValueError(f"MIXED_CRITERION {config.MIXED_CRITERION!r} not in "
+                             f"{config.MIXED_CRITERIA}")
+        if config.MIXED_ON_FAIL not in config.MIXED_ON_FAILS:
+            raise ValueError(f"MIXED_ON_FAIL {config.MIXED_ON_FAIL!r} not in "
+                             f"{config.MIXED_ON_FAILS}")
+        if config.MIXED_AXES not in config.MIXED_AXES_OPTIONS:
+            raise ValueError(f"MIXED_AXES {config.MIXED_AXES!r} not in "
+                             f"{config.MIXED_AXES_OPTIONS}")
     fall_of = fall_of or {}
     reached = set(reached)
     tan_phi = np.tan(np.radians(phi_deg))
@@ -812,12 +855,64 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
             adj.setdefault(u, set()).add(c)
 
     def fall(c):
-        return fall_of.get(c, fall_xy) if opening else fall_xy
+        return fall_of.get(c, fall_xy) if local_fall else fall_xy
 
     def axes(xy0, xy1, f):
         fx, fy = f
         dx, dy = xy1[0] - xy0[0], xy1[1] - xy0[1]
         return dx * fx + dy * fy, -dx * fy + dy * fx      # along (+down), cross
+
+    ring_of = None if front_ring is None else dict(front_ring)
+    normal_cache = {}
+
+    def rings():
+        nonlocal ring_of
+        if ring_of is None:
+            ring_of = {trigger_cluster_id: 0}
+            queue = [trigger_cluster_id]
+            for c in queue:                               # BFS hop count
+                for u in sorted(neighbours.get(c, ())):
+                    if u in reached and u not in ring_of:
+                        ring_of[u] = ring_of[c] + 1
+                        queue.append(u)
+        return ring_of
+
+    def front_normal(n):
+        """Unit gradient of the arrival ring at n (map frame), or None."""
+        if n not in normal_cache:
+            x0, y0 = centroids[n]
+            rad = config.FRONT_FIT_RADIUS_M
+            pts = [(centroids[c][0] - x0, centroids[c][1] - y0, r)
+                   for c, r in sorted(rings().items())
+                   if c in reached and c in centroids
+                   and np.hypot(centroids[c][0] - x0, centroids[c][1] - y0) <= rad]
+            nu = None
+            if len(pts) >= 4:
+                A = np.array([[p[0], p[1], 1.0] for p in pts])
+                if np.linalg.matrix_rank(A) == 3:
+                    g = np.linalg.lstsq(A, np.array([p[2] for p in pts], float),
+                                        rcond=None)[0][:2]
+                    gn = float(np.hypot(*g))
+                    if gn > 1e-9:
+                        nu = (g[0] / gn, g[1] / gn)
+            normal_cache[n] = nu
+        return normal_cache[n]
+
+    def split_axes(n, f_n):
+        """(t, e, name): the axes of the 'mixed' split at flank cell n."""
+        e = (-f_n[1], f_n[0])
+        mode_ax = config.MIXED_AXES
+        # An edge flank borders slab the BFS did not admit; a slab-crack start
+        # cell is a break in the slab, not attached slab, so it does not count.
+        if mode_ax == 'fall' or (mode_ax == 'front_edge' and all(
+                u in reached or u in cracks for u in adj.get(n, ()))):
+            return f_n, e, 'fall'
+        nu = front_normal(n)
+        if nu is None:
+            return f_n, e, 'fall'
+        if nu[0] * e[0] + nu[1] * e[1] < 0:              # keep the + side on +e
+            nu = (-nu[0], -nu[1])
+        return (nu[1], -nu[0]), nu, 'front'
 
     def loaded(n, orient, alen=0.0):
         """Net downslope load on the slab at n from detached slab nearby; in
@@ -854,6 +949,22 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
             return False
         th = np.radians(np.mean(slopes))
         drive = np.sin(th) - tan_phi * np.cos(th)
+        if trace_out is not None and orient == 'flank':
+            fp = np.mean(side[1], axis=0) if side[1] else (0.0, 0.0)
+            fm = np.mean(side[-1], axis=0) if side[-1] else (0.0, 0.0)
+            _trace.clear()
+            _trace.update(cid=n, prev=_step[0], start=_step[1], sgn=_step[2],
+                          alen=alen, fall_e=f_n[0], fall_n=f_n[1], L=L, W=W,
+                          drive=drive, n_plus=len(side[1]), n_minus=len(side[-1]),
+                          dF_e=fp[0] - fm[0], dF_n=fp[1] - fm[1],
+                          kic=props.get(n, {}).get(config.TOUGHNESS_K_COL, np.nan),
+                          rho=props.get(n, {}).get('slab_density', np.nan))
+            trace_out.append(_trace.copy())
+        if mixed and orient == 'flank':
+            ok = mixed_flank(n, f_n, side, L, drive, alen)
+            if trace_out is not None:
+                trace_out[-1].update(_trace_mixed)
+            return ok
         if not (opening and orient == 'flank'):
             return drive > 0
         # Mode I flank: the two sides must pull apart across the line, i.e.
@@ -881,6 +992,44 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
                 intact_out.add(n)
         return True
 
+    def mixed_flank(n, f_n, side, L, drive, alen):
+        """'mixed' flank step: K_I from the opening part, K_II from the shear
+        part of the relative motion across the line (config.MIXED_CRITERION).
+        On failure: stop the line, or mark the cell intact (MIXED_ON_FAIL)."""
+        _trace_mixed.clear()
+        if drive <= 0 or not (side[1] or side[-1]):
+            return False
+        (tx, ty), (ex, ey), ax_name = split_axes(n, f_n)  # along / across the line
+        fp = np.mean(side[1], axis=0) if side[1] else (0.0, 0.0)
+        fm = np.mean(side[-1], axis=0) if side[-1] else (0.0, 0.0)
+        dx, dy = fp[0] - fm[0], fp[1] - fm[1]
+        d_open = max(dx * ex + dy * ey, 0.0)              # closing gives no K_I
+        d_shear = abs(dx * tx + dy * ty)
+        kic = props.get(n, {}).get(config.TOUGHNESS_K_COL, np.nan)
+        if not np.isfinite(kic) or kic <= 0:
+            return d_open > 0 or d_shear > 0              # untestable: geometry only
+        scale = (config.TOUGHNESS_EDGE_F * props[n]['slab_density'] * G_ACC * L
+                 * drive / 2.0 * np.sqrt(np.pi * max(alen, 0.0)))
+        k1, k2 = scale * d_open, scale * d_shear
+        _trace_mixed.clear()
+        _trace_mixed.update(d_open=d_open, d_shear=d_shear, k1=k1, k2=k2,
+                            axes=ax_name, t_e=tx, t_n=ty)
+        if config.MIXED_CRITERION == 'energy':
+            breaks = k1 ** 2 + k2 ** 2 >= kic ** 2
+        else:
+            breaks = ((k1 / kic) ** 2
+                      + (k2 / (config.K_IIC_OVER_K_IC * kic)) ** 2) >= 1.0
+        stats['mixed_steps'] += 1
+        _trace_mixed['breaks'] = bool(breaks)
+        if breaks:
+            return True
+        stats['mixed_fail'] += 1
+        if config.MIXED_ON_FAIL == 'stop':
+            return False
+        if intact_out is not None:
+            intact_out.add(n)
+        return True
+
     def next_on_line(c, orient, sgn):
         best = None
         f_c = fall(c)
@@ -899,8 +1048,11 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
                 best = (key, n)
         return None if best is None else best[1]
 
+    _trace, _trace_mixed, _step = {}, {}, [None, None, 0]
     cut = set()
     stats = {'cracks_crown': 0, 'cracks_flank': 0, 'line_crown': 0, 'line_flank': 0}
+    if mixed:
+        stats.update(mixed_steps=0, mixed_fail=0)
     for c0 in sorted(cracks):
         orient = cracks[c0]
         if c0 not in centroids:
@@ -908,16 +1060,21 @@ def slab_crack_lines(reached, cracks, trigger_cluster_id, neighbours, centroids,
         stats['cracks_' + orient] += 1
         for sgn in (1, -1):
             c, seen, alen = c0, {c0}, 0.0
+            on_line = []
+            if lines_out is not None:
+                lines_out.append(dict(start=c0, orient=orient, sgn=sgn, cells=on_line))
             while True:
                 n = next_on_line(c, orient, sgn)
                 step = (float(np.hypot(centroids[n][0] - centroids[c][0],
                                        centroids[n][1] - centroids[c][1]))
                         if n is not None and n in centroids else 0.0)
+                _step[:] = [c, c0, sgn]
                 if (n is None or n in seen or n not in reached
                         or n == trigger_cluster_id or not loaded(n, orient, alen + step)):
                     break
                 alen += step
                 seen.add(n)
+                on_line.append(n)
                 if n not in cut:
                     cut.add(n); stats['line_' + orient] += 1
                 c = n
@@ -1254,7 +1411,7 @@ def propagate_crack(
     fall_xy        = (np.sin(np.radians(t_aspect)), np.cos(np.radians(t_aspect)))
     # Local fall lines for the slab cracks ('opening' mode; 'shear' uses the
     # trigger's fall_xy everywhere, as every release before 2026-11-16 did).
-    crack_opening  = config.SLAB_CRACK_MODE == 'opening'
+    crack_opening  = config.SLAB_CRACK_MODE in ('opening', 'mixed')
     fall_cache: dict = {}
 
     def _crack_fall(cid):
@@ -1268,6 +1425,7 @@ def propagate_crack(
         return fall_cache[cid]
     current_ring   = [trigger_cluster_id]
     ring_idx       = 0
+    ring_of        = {trigger_cluster_id: 0}   # arrival ring (mixed front axes)
 
     # Anisotropic rings: the cross-slope front advances
     # MODE3_SPEED_RATIO / MODE2_SPEED_RATIO as far per ring as the along-slope
@@ -1321,6 +1479,7 @@ def propagate_crack(
             qualifies, reason = _qualifies(cid, parent_props)
             if qualifies:
                 reached.add(cid)
+                ring_of[cid] = ring_idx
                 cluster_props[cid] = _get_props(cid)
                 next_ring.append(cid)
                 direction = _direction(cid)
@@ -1401,7 +1560,7 @@ def propagate_crack(
             reached, slab_cracks, trigger_cluster_id, neighbours, centroids,
             fall_xy, cluster_props, _mean_slope, cluster_map,
             fall_of=({c: _crack_fall(c) for c in reached} if crack_opening else None),
-            intact_out=intact, cut_out=line_cells)
+            intact_out=intact, cut_out=line_cells, front_ring=ring_of)
         if unified:
             # UNIFIED_SLIDE: keep the severed pieces; the push routing below
             # decides them, with no push across a slab crack.

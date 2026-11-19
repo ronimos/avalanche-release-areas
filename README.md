@@ -20,7 +20,7 @@ Given pre-computed SNOWPACK cluster features (slab density, WL shear strength, s
    - the slab tensile gate;
    - the Stauchwall (a cluster whose mean slope is below 29°);
    - the start-zone boundary.
-4. Outputs one release polygon per trigger by default (the most likely scenario); optional sweep over size factors and depth percentiles
+4. Outputs exactly one release polygon (scenario) per trigger
 5. Compares against an observed release polygon (IoU metric)
 
 The last three selection steps are relative, so the model always returns a

@@ -19,7 +19,7 @@ Outputs:
 
 Usage
 -----
-  # One (most likely) scenario per trigger — default:
+  # One scenario per trigger (always):
   generate-scenarios \\
       --features-csv  data/little_prof/features/all_start_zone_features_2026-01-18.csv \\
       --meloche-csv   data/little_prof/features/meloche_features_all_2026-01-18.csv \\
@@ -28,10 +28,6 @@ Usage
       --start-zone    data/little_prof/boundaries/start_zone.kml \\
       --release-poly  data/little_prof/boundaries/avalanche_release_area_20260118.geojson \\
       --out-dir       outputs/little_prof
-
-  # Release-size sensitivity sweep (5 triggers × 5 sizes = 25 scenarios):
-  generate-scenarios ... \\
-      --size-factors 0.75 0.875 1.0 1.125 1.25
 
   # Let the arrest criteria, not the safety cap, bound the region:
   generate-scenarios ... --max-clusters 2000
@@ -81,6 +77,123 @@ def rank_triggers(cand_df: pd.DataFrame, n: int, sk38_col: str,
     ranked = cand_df.dropna(subset=[sk38_col])
     keys = [sk38_col] + ([rc_col] if rc_col in ranked.columns else [])
     return ranked.sort_values(keys, na_position='last').head(n)
+
+
+class NoTriggerError(ValueError):
+    """The filter chain left no candidate trigger cluster."""
+
+
+def _scalar(df, cid, col):
+    if cid not in df.index or col not in df.columns:
+        return np.nan
+    v = df.loc[cid, col]
+    if isinstance(v, pd.Series):
+        v = v.iloc[0]
+    return float(v)
+
+
+def sk38_column(features_df: pd.DataFrame) -> str:
+    return 'min_sk38' if 'min_sk38' in features_df.columns else 'sk38_min'
+
+
+def select_triggers(features_df: pd.DataFrame, meloche_df: pd.DataFrame,
+                    cluster_map: np.ndarray, dem: np.ndarray,
+                    start_zone_mask: np.ndarray, n_triggers: int,
+                    stauchwall_deg: float = None,
+                    max_slab_thickness: float = None) -> list:
+    """The trigger filter chain (CLAUDE.md "Filter chain"; order matters) and
+    the Sk38 ranking. Returns up to n_triggers unique cluster ids, best first.
+    Raises NoTriggerError when no candidate survives."""
+    sk38_col = sk38_column(features_df)
+
+    sk38_col = 'min_sk38' if 'min_sk38' in features_df.columns else 'sk38_min'
+
+    MIN_TAU_G          = config.MIN_TAU_G
+    MAX_SK38           = config.MAX_SK38
+    MIN_SLAB_THICKNESS = config.MIN_SLAB_THICKNESS
+    MAX_SLAB_THICKNESS = (config.MAX_SLAB_THICKNESS if max_slab_thickness is None
+                          else max_slab_thickness)
+    stauchwall_deg = config.STAUCHWALL_DEG if stauchwall_deg is None else stauchwall_deg
+    MIN_SLOPE_TRIGGER  = stauchwall_deg + config.SLOPE_MARGIN_DEG
+
+    sz_cids = set(int(c) for c in np.unique(cluster_map[start_zone_mask]) if c > 0)
+    candidate_ids = [cid for cid in features_df.index if cid in sz_cids]
+    print(f"  Start zone clusters with features: {len(candidate_ids)}")
+
+    # Filter 1: tau_g, slope, Sk38
+    if not meloche_df.empty and 'tau_g' in meloche_df.columns:
+        candidate_ids = [
+            cid for cid in candidate_ids
+            if cid in meloche_df.index
+            and _scalar(meloche_df, cid, 'tau_g') >= MIN_TAU_G
+            and _scalar(meloche_df, cid, 'slope_angle') >= MIN_SLOPE_TRIGGER
+            and _scalar(features_df, cid, sk38_col) < MAX_SK38
+        ]
+        print(f"  Candidates after tau_g >= {MIN_TAU_G} Pa, "
+              f"slope >= {MIN_SLOPE_TRIGGER:.1f}°, "
+              f"Sk38 < {MAX_SK38} filter: {len(candidate_ids)}")
+
+    # Filter 2: slab thickness
+    candidate_ids = [
+        cid for cid in candidate_ids
+        if np.isnan(_scalar(features_df, cid, 'slab_thickness'))
+        or (MIN_SLAB_THICKNESS
+            <= _scalar(features_df, cid, 'slab_thickness')
+            <= MAX_SLAB_THICKNESS)
+    ]
+    print(f"  Candidates after slab_thickness {MIN_SLAB_THICKNESS}–{MAX_SLAB_THICKNESS} m filter: "
+          f"{len(candidate_ids)}")
+
+    # Slab tensile gate on the trigger: rank only triggers whose slab can carry
+    # a crack to r_c, so the ranking still yields n_triggers releases.
+    if (config.USE_SLAB_TENSILE_GATE and config.ARREST_MODE == 'legacy'
+            and config.SLAB_TENSILE_SIGMA_COL not in features_df.columns):
+        print(f"  WARNING: slab tensile gate is on but the features CSV has no "
+              f"'{config.SLAB_TENSILE_SIGMA_COL}' column, so it never fires; "
+              f"regenerate the CSV")
+    if config.USE_SLAB_TENSILE_GATE and config.ARREST_MODE == 'legacy':
+        candidate_ids = [
+            cid for cid in candidate_ids
+            if not (_rg.cluster_tensile_support(cid, meloche_df, features_df) < 1.0)]
+        print(f"  Candidates after slab tensile support S_t >= 1: {len(candidate_ids)}")
+
+    # Filter 3: elevation — keep upper P50 of candidate zone
+    if candidate_ids:
+        elev_pairs = []
+        for cid in candidate_ids:
+            pxs = np.argwhere(cluster_map == cid)
+            if len(pxs):
+                elev_pairs.append((cid, float(dem[pxs[:, 0], pxs[:, 1]].mean())))
+        if elev_pairs:
+            elev_threshold = np.percentile([e for _, e in elev_pairs], 50)
+            candidate_ids = [cid for cid, e in elev_pairs if e >= elev_threshold]
+            print(f"  Candidates after elevation >= P50 "
+                  f"({elev_threshold:.0f} m) filter: {len(candidate_ids)}")
+
+    if not candidate_ids:
+        raise NoTriggerError("no candidate trigger clusters survived filters.")
+
+    cand_df = features_df.loc[candidate_ids].copy()
+
+    # Filter 4: Pi1 propagation gate (median)
+    if not meloche_df.empty and 'Pi1_elastic' in meloche_df.columns:
+        pi1_vals = {}
+        for cid in cand_df.index:
+            if cid in meloche_df.index:
+                v = meloche_df.loc[cid, 'Pi1_elastic']
+                pi1_vals[cid] = float(v.iloc[0]) if isinstance(v, pd.Series) else float(v)
+        cand_df['Pi1_elastic'] = pd.Series(pi1_vals)
+        pi1_valid = cand_df['Pi1_elastic'].dropna()
+        if len(pi1_valid) > 0:
+            pi1_median = float(pi1_valid.median())
+            pre_gate = cand_df.dropna(subset=[sk38_col]).shape[0]
+            cand_df = cand_df[cand_df['Pi1_elastic'] >= pi1_median]
+            print(f"  Pi1 propagation gate (>= median {pi1_median:.2f}): "
+                  f"{pre_gate} → {cand_df.shape[0]} candidates")
+
+    triggers_df = rank_triggers(cand_df, n_triggers, sk38_col)
+    # One scenario per trigger: a trigger listed twice would be built twice.
+    return list(dict.fromkeys(triggers_df.index))
 
 
 def load_kml_mask(kml_path: Path, dem_shape, transform,
@@ -178,9 +291,9 @@ def main():
     ap.add_argument('--release-poly',  default=None)
     ap.add_argument('--out-dir',       required=True)
     ap.add_argument('--n-triggers',         type=int,   default=config.N_TOP_TRIGGERS)
-    ap.add_argument('--size-factors',       type=float, nargs='+',
-                    default=config.SIZE_FACTORS,
-                    help='Release size multipliers (default: [1.0] — most likely only)')
+    ap.add_argument('--size-factor',        type=float, default=config.SIZE_FACTOR,
+                    help=f'Release size multiplier (default: {config.SIZE_FACTOR}). '
+                         'One scenario per trigger; there is no size sweep.')
     ap.add_argument('--stauchwall-deg',     type=float, default=config.STAUCHWALL_DEG,
                     help=f'Slope threshold for stauchwall arrest '
                          f'(default: {config.STAUCHWALL_DEG}°)')
@@ -251,9 +364,26 @@ def main():
     ap.add_argument('--slab-crack-mode', choices=config.SLAB_CRACK_MODES,
                     default=config.SLAB_CRACK_MODE,
                     help="fracture mode of the slab-crack lines: 'opening' (Mode I, "
-                         'local fall lines, a flank needs the sides to pull apart) or '
+                         'local fall lines, a flank needs the sides to pull apart), '
                          "'shear' (Mode II, the trigger's fall line, every release "
-                         f'before 2026-11-16; default: {config.SLAB_CRACK_MODE}).')
+                         "before 2026-11-16) or 'mixed' (I + II by the load's split; "
+                         f'experiment) (default: {config.SLAB_CRACK_MODE}).')
+    ap.add_argument('--mixed-criterion', choices=config.MIXED_CRITERIA,
+                    default=config.MIXED_CRITERION,
+                    help="'mixed' flanks: 'energy' (K_I^2 + K_II^2 >= K_Ic^2) or "
+                         "'elliptic' (K_IIc = K_IIC_OVER_K_IC K_Ic) "
+                         f'(default: {config.MIXED_CRITERION}).')
+    ap.add_argument('--mixed-on-fail', choices=config.MIXED_ON_FAILS,
+                    default=config.MIXED_ON_FAIL,
+                    help="'mixed' flank step that cannot break the slab: 'stop' the "
+                         "line, or mark the cell 'intact' (removed after the cut) "
+                         f'(default: {config.MIXED_ON_FAIL}).')
+    ap.add_argument('--mixed-axes', choices=config.MIXED_AXES_OPTIONS,
+                    default=config.MIXED_AXES,
+                    help="'mixed' split axes: 'fall' (the fall line everywhere), "
+                         "'front_edge' (edge flanks split on the weak-layer front's "
+                         "tangent, interior flanks on the fall line) or "
+                         f"'front' (front axes everywhere) (default: {config.MIXED_AXES}).")
     ap.add_argument('--delta', type=float, default=config.DELTA,
                     help=f'Meloche softening coefficient for the BFS Eq. 20 test '
                          f'(default: {config.DELTA}; Fig. 8 runs used 0). '
@@ -282,12 +412,21 @@ def main():
     config.USE_DISTANCE_CAPS = args.distance_caps
     config.USE_SLAB_CRACK_LINES = args.slab_crack_lines
     config.SLAB_CRACK_MODE = args.slab_crack_mode
+    config.MIXED_CRITERION = args.mixed_criterion
+    config.MIXED_ON_FAIL = args.mixed_on_fail
+    config.MIXED_AXES = args.mixed_axes
     config.USE_OPENING_TOUGHNESS = args.opening_toughness
     config.USE_DOWNSLOPE_SLIDE = args.downslope_slide
     config.UNIFIED_SLIDE = args.unified_slide
 
     out_dir = Path(args.out_dir)
     (out_dir / 'scenarios').mkdir(parents=True, exist_ok=True)
+    # Scenario dirs left by an earlier run (e.g. more triggers) would sit
+    # beside this run's and break one-scenario-per-trigger in the tree.
+    import shutil
+    for stale in (out_dir / 'scenarios').glob('scenario_*'):
+        if stale.is_dir():
+            shutil.rmtree(stale)
 
     # --- Load inputs ---
     features_df = pd.read_csv(args.features_csv, index_col=0)
@@ -321,100 +460,15 @@ def main():
             print(f"Warning: could not load observed polygons: {e}")
 
     # --- Select top-N trigger clusters (lowest Sk38 = most unstable) ---
-    sk38_col = 'min_sk38' if 'min_sk38' in features_df.columns else 'sk38_min'
-
-    MIN_TAU_G          = config.MIN_TAU_G
-    MAX_SK38           = config.MAX_SK38
-    MIN_SLAB_THICKNESS = config.MIN_SLAB_THICKNESS
-    MAX_SLAB_THICKNESS = args.max_slab_thickness
-    MIN_SLOPE_TRIGGER  = args.stauchwall_deg + config.SLOPE_MARGIN_DEG
-
-    sz_cids = set(int(c) for c in np.unique(cluster_map[start_zone_mask]) if c > 0)
-    candidate_ids = [cid for cid in features_df.index if cid in sz_cids]
-    print(f"  Start zone clusters with features: {len(candidate_ids)}")
-
-    def _scalar(df, cid, col):
-        if cid not in df.index or col not in df.columns:
-            return np.nan
-        v = df.loc[cid, col]
-        if isinstance(v, pd.Series):
-            v = v.iloc[0]
-        return float(v)
-
-    # Filter 1: tau_g, slope, Sk38
-    if not meloche_df.empty and 'tau_g' in meloche_df.columns:
-        candidate_ids = [
-            cid for cid in candidate_ids
-            if cid in meloche_df.index
-            and _scalar(meloche_df, cid, 'tau_g') >= MIN_TAU_G
-            and _scalar(meloche_df, cid, 'slope_angle') >= MIN_SLOPE_TRIGGER
-            and _scalar(features_df, cid, sk38_col) < MAX_SK38
-        ]
-        print(f"  Candidates after tau_g >= {MIN_TAU_G} Pa, "
-              f"slope >= {MIN_SLOPE_TRIGGER:.1f}°, "
-              f"Sk38 < {MAX_SK38} filter: {len(candidate_ids)}")
-
-    # Filter 2: slab thickness
-    candidate_ids = [
-        cid for cid in candidate_ids
-        if np.isnan(_scalar(features_df, cid, 'slab_thickness'))
-        or (MIN_SLAB_THICKNESS
-            <= _scalar(features_df, cid, 'slab_thickness')
-            <= MAX_SLAB_THICKNESS)
-    ]
-    print(f"  Candidates after slab_thickness {MIN_SLAB_THICKNESS}–{MAX_SLAB_THICKNESS} m filter: "
-          f"{len(candidate_ids)}")
-
-    # Slab tensile gate on the trigger: rank only triggers whose slab can carry
-    # a crack to r_c, so the ranking still yields n_triggers releases.
-    if (config.USE_SLAB_TENSILE_GATE and config.ARREST_MODE == 'legacy'
-            and config.SLAB_TENSILE_SIGMA_COL not in features_df.columns):
-        print(f"  WARNING: slab tensile gate is on but the features CSV has no "
-              f"'{config.SLAB_TENSILE_SIGMA_COL}' column, so it never fires; "
-              f"regenerate the CSV")
-    if config.USE_SLAB_TENSILE_GATE and config.ARREST_MODE == 'legacy':
-        candidate_ids = [
-            cid for cid in candidate_ids
-            if not (_rg.cluster_tensile_support(cid, meloche_df, features_df) < 1.0)]
-        print(f"  Candidates after slab tensile support S_t >= 1: {len(candidate_ids)}")
-
-    # Filter 3: elevation — keep upper P50 of candidate zone
-    if candidate_ids:
-        elev_pairs = []
-        for cid in candidate_ids:
-            pxs = np.argwhere(cluster_map == cid)
-            if len(pxs):
-                elev_pairs.append((cid, float(dem[pxs[:, 0], pxs[:, 1]].mean())))
-        if elev_pairs:
-            elev_threshold = np.percentile([e for _, e in elev_pairs], 50)
-            candidate_ids = [cid for cid, e in elev_pairs if e >= elev_threshold]
-            print(f"  Candidates after elevation >= P50 "
-                  f"({elev_threshold:.0f} m) filter: {len(candidate_ids)}")
-
-    if not candidate_ids:
-        print("ERROR: no candidate trigger clusters survived filters.")
+    sk38_col = sk38_column(features_df)
+    try:
+        trigger_ids = select_triggers(
+            features_df, meloche_df, cluster_map, dem, start_zone_mask,
+            args.n_triggers, args.stauchwall_deg, args.max_slab_thickness)
+    except NoTriggerError as e:
+        print(f"ERROR: {e}")
         sys.exit(1)
-
-    cand_df = features_df.loc[candidate_ids].copy()
-
-    # Filter 4: Pi1 propagation gate (median)
-    if not meloche_df.empty and 'Pi1_elastic' in meloche_df.columns:
-        pi1_vals = {}
-        for cid in cand_df.index:
-            if cid in meloche_df.index:
-                v = meloche_df.loc[cid, 'Pi1_elastic']
-                pi1_vals[cid] = float(v.iloc[0]) if isinstance(v, pd.Series) else float(v)
-        cand_df['Pi1_elastic'] = pd.Series(pi1_vals)
-        pi1_valid = cand_df['Pi1_elastic'].dropna()
-        if len(pi1_valid) > 0:
-            pi1_median = float(pi1_valid.median())
-            pre_gate = cand_df.dropna(subset=[sk38_col]).shape[0]
-            cand_df = cand_df[cand_df['Pi1_elastic'] >= pi1_median]
-            print(f"  Pi1 propagation gate (>= median {pi1_median:.2f}): "
-                  f"{pre_gate} → {cand_df.shape[0]} candidates")
-
-    triggers_df = rank_triggers(cand_df, args.n_triggers, sk38_col)
-    trigger_ids = list(triggers_df.index)
+    triggers_df = features_df.loc[trigger_ids]
     sk38_vals   = list(triggers_df[sk38_col].round(3))
     print(f"Top-{args.n_triggers} triggers (lowest Sk38, ties by r_c): {trigger_ids}  Sk38={sk38_vals}")
 
@@ -442,7 +496,9 @@ def main():
           f"{np.isfinite(depth_raster).sum()} px")
 
     # --- Scenario sweep ---
-    total_scenarios = len(trigger_ids) * len(args.size_factors)
+    # One scenario per trigger.
+    sf = args.size_factor
+    total_scenarios = len(trigger_ids)
     scenario_weight = 1.0 / total_scenarios if total_scenarios > 0 else 1.0
 
     scenarios   = []
@@ -466,93 +522,86 @@ def main():
         else:
             trig_cents.append(None)
 
-        best = {'iou': -1.0, 'poly': None, 'sf': None}
+        scenario_n += 1
+        sid = f"scenario_{scenario_n:03d}"
 
-        for sf in args.size_factors:
-            scenario_n += 1
-            sid = f"scenario_{scenario_n:03d}"
+        energy_state = {} if config.ARREST_MODE != 'legacy' else None
+        poly = make_release_polygon_2d(
+            trigger_cluster_id = trig_id,
+            A_ca               = A_ca_val,
+            meloche_df         = meloche_df,
+            cluster_map        = cluster_map,
+            dem                = dem,
+            transform          = transform,
+            start_zone_mask    = start_zone_mask,
+            snap_features      = features_df,
+            size_factor        = sf,
+            stauchwall_deg     = args.stauchwall_deg,
+            max_clusters       = args.max_clusters,
+            pixel_index        = pixel_index,
+            state_out          = energy_state,
+        )
 
-            energy_state = {} if config.ARREST_MODE != 'legacy' else None
-            poly = make_release_polygon_2d(
-                trigger_cluster_id = trig_id,
-                A_ca               = A_ca_val,
-                meloche_df         = meloche_df,
-                cluster_map        = cluster_map,
-                dem                = dem,
+        iou = 0.0
+        if poly and observed_polygon:
+            inter = poly.intersection(observed_polygon).area
+            union = poly.union(observed_polygon).area
+            iou   = inter / union if union > 0 else 0.0
+
+        if poly:
+            # Clip the depth raster to this polygon so mean depth and
+            # volume describe the release area, not the whole domain.
+            scenario_depth = rasterize_release_polygon(
+                poly, depth_raster, dem.shape, transform)
+            # Density of the slab that releases: the clusters this
+            # polygon covers, not the trigger cluster alone.
+            density_mean, density_std = polygon_density(
+                poly, cluster_map, features_df, transform)
+            row = write_scenario(
+                scenario_dir       = out_dir / 'scenarios',
+                scenario_id        = sid,
+                release_polygon    = poly,
+                depth_raster       = scenario_depth,
+                dem_shape          = dem.shape,
                 transform          = transform,
-                start_zone_mask    = start_zone_mask,
-                snap_features      = features_df,
+                crs_wkt            = crs_wkt,
+                density_mean       = density_mean,
+                density_std        = density_std,
+                trigger_cluster_id = int(trig_id),
+                A_ca               = A_ca_val,
                 size_factor        = sf,
-                stauchwall_deg     = args.stauchwall_deg,
-                max_clusters       = args.max_clusters,
-                pixel_index        = pixel_index,
-                state_out          = energy_state,
+                weight             = scenario_weight,
             )
+            row['iou'] = iou
+        else:
+            row = {
+                'scenario_id':      sid,
+                'trigger_cluster':  int(trig_id),
+                'A_ca_m':           round(A_ca_val, 2),
+                'size_factor':      sf,
+                'release_area_m2':  0.0,
+                'iou':              0.0,
+            }
+        if config.MASK_MODE == 'diagnostic':
+            row['frac_outside_mask'] = frac_outside_mask(
+                poly, start_zone_mask, transform)
+        scenarios.append(row)
+        if energy_state and 'cells' not in energy_state:
+            sdir = out_dir / 'scenarios' / sid
+            sdir.mkdir(parents=True, exist_ok=True)
+            pd.Series(energy_state['rejected'], name='reason', dtype=object) \
+                .rename_axis('cluster_id').to_csv(sdir / 'rejected.csv')
+        elif energy_state:
+            sdir = out_dir / 'scenarios' / sid
+            sdir.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame.from_dict(energy_state['cells'], orient='index') \
+                .rename_axis('cluster_id').to_csv(sdir / 'energy_cells.csv')
+            pd.Series(energy_state['rejected'], name='reason', dtype=object) \
+                .rename_axis('cluster_id').to_csv(sdir / 'energy_rejected.csv')
 
-            iou = 0.0
-            if poly and observed_polygon:
-                inter = poly.intersection(observed_polygon).area
-                union = poly.union(observed_polygon).area
-                iou   = inter / union if union > 0 else 0.0
 
-            if poly:
-                # Clip the depth raster to this polygon so mean depth and
-                # volume describe the release area, not the whole domain.
-                scenario_depth = rasterize_release_polygon(
-                    poly, depth_raster, dem.shape, transform)
-                # Density of the slab that releases: the clusters this
-                # polygon covers, not the trigger cluster alone.
-                density_mean, density_std = polygon_density(
-                    poly, cluster_map, features_df, transform)
-                row = write_scenario(
-                    scenario_dir       = out_dir / 'scenarios',
-                    scenario_id        = sid,
-                    release_polygon    = poly,
-                    depth_raster       = scenario_depth,
-                    dem_shape          = dem.shape,
-                    transform          = transform,
-                    crs_wkt            = crs_wkt,
-                    density_mean       = density_mean,
-                    density_std        = density_std,
-                    trigger_cluster_id = int(trig_id),
-                    A_ca               = A_ca_val,
-                    size_factor        = sf,
-                    weight             = scenario_weight,
-                )
-                row['iou'] = iou
-            else:
-                row = {
-                    'scenario_id':      sid,
-                    'trigger_cluster':  int(trig_id),
-                    'A_ca_m':           round(A_ca_val, 2),
-                    'size_factor':      sf,
-                    'release_area_m2':  0.0,
-                    'iou':              0.0,
-                }
-            if config.MASK_MODE == 'diagnostic':
-                row['frac_outside_mask'] = frac_outside_mask(
-                    poly, start_zone_mask, transform)
-            scenarios.append(row)
-            if energy_state and 'cells' not in energy_state:
-                sdir = out_dir / 'scenarios' / sid
-                sdir.mkdir(parents=True, exist_ok=True)
-                pd.Series(energy_state['rejected'], name='reason', dtype=object) \
-                    .rename_axis('cluster_id').to_csv(sdir / 'rejected.csv')
-            elif energy_state:
-                sdir = out_dir / 'scenarios' / sid
-                sdir.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame.from_dict(energy_state['cells'], orient='index') \
-                    .rename_axis('cluster_id').to_csv(sdir / 'energy_cells.csv')
-                pd.Series(energy_state['rejected'], name='reason', dtype=object) \
-                    .rename_axis('cluster_id').to_csv(sdir / 'energy_rejected.csv')
-
-            if iou > best['iou']:
-                best = {'iou': iou, 'poly': poly, 'sf': sf}
-
-        # Plot the polygon whose IoU is being reported, not whichever
-        # size factor happened to come last.
-        trig_ious.append(max(best['iou'], 0.0))
-        mel_polys.append((best['poly'], best['sf']))
+        trig_ious.append(max(iou, 0.0))
+        mel_polys.append((poly, sf))
         sk38_trig = _scalar(features_df, trig_id, sk38_col)
         trig_labels.append(
             f"T{trigger_ids.index(trig_id)+1} cid={trig_id} "

@@ -1061,12 +1061,12 @@ answer. That threshold cannot be chosen from Jan 18.
 **Ranking.** The survivors are ranked by Sk38 ascending (`rank_triggers`).
 The top N go to the BFS: `config.N_TOP_TRIGGERS` = 3 here (since
 2026-10-09), and `n_triggers` = 5 in avachain's Little Professor TOML. Each
-trigger yields one release polygon per `--size-factors` entry (default here: a
-single polygon at size factor 1.0).
+trigger yields exactly one release polygon, at `--size-factor`
+(`config.SIZE_FACTOR` = 1.0). There is no size sweep here (Ron, 2026-11-18).
 
 **Where avachain differs operationally.** These differences are in
 scenario output, not physics. The filter chain itself is the same:
-- **Weights.** Here every scenario gets weight 1/(N × size factors). avachain
+- **Weights.** Here every scenario gets weight 1/N. avachain
   weights triggers by inverse Sk38 (`_trigger_weights`, normalised 1/Sk38).
   It weights size factors log-normally around the median
   ([0.70, 0.85, 1.00, 1.15, 1.30]), and depth percentiles P50 0.6 against
@@ -1453,6 +1453,120 @@ The difference is pinned by synthetic-terrain unit tests
 (`tests/test_slab_crack_lines.py`: planar, convex roll, gully, a tilted fall
 line). avachain's calibrated slopes pin `'shear'` in `[calibration]` until the
 next recalibration.
+
+#### Mixed mode (`SLAB_CRACK_MODE = 'mixed'`, 2026-11-18, experiment)
+
+A flank step splits the relative motion across the line,
+D = drive · (F₊ − F₋) (attached side F = 0), into an opening part
+d_I = max(D·ê, 0) and a shear part d_II = |D·t̂|. Each part gives
+σ = ρ g L |d| / 2 and K = 1.122 σ √(π a), with a the line's length so far.
+`MIXED_CRITERION` is `'energy'` (K_I² + K_II² ≥ K_Ic²) or `'elliptic'`
+((K_I/K_Ic)² + (K_II/K_IIc)² ≥ 1, K_IIc = K_Ic/1.4, Schweizer, Michot &
+Kirchner 2004 abstract). `MIXED_ON_FAIL` decides what happens at a step that
+cannot break the slab: `'stop'` ends the line there; `'intact'` runs the line
+on and removes the cell after the cut. In `'intact'`, a removed cell still
+counts as part of the cut when the severed set is decided, as in
+`USE_OPENING_TOUGHNESS`.
+
+**Split axes (`MIXED_AXES`, Ron 2026-11-19).** t̂ is the direction the slab
+breaks along. Under `'fall'` (**the default**; the 11-18 runs) it is the cell's fall line. At
+an edge flank the slab breaks where the weak-layer front stopped, and that
+front is curved near the trigger. Under `'front_edge'` an
+edge flank's ê is the unit gradient of the BFS arrival ring: a least-squares
+plane through the admitted clusters within `FRONT_FIT_RADIUS_M` = 10 m
+(2 × `SLAB_CRACK_BAND_M`). An edge flank is a cell with a BFS neighbour that
+is neither admitted nor a slab-crack start. Interior flanks keep the fall
+axes, because inside the release the front runs across the line, not along
+it. `'front'` uses the front axes everywhere. A cell with fewer than 4
+clusters in the fit keeps the fall axes.
+
+Measured on Jan 18 (`examples/alpha_jan18.py`, inside shots), α is the
+angle between the front tangent and the fall line at edge flank steps. Its
+median is 38° (p10 7°, p90 66°). Against distance from the trigger it is not
+monotonic: 42° within 10 m, 25–27° at 10–80 m, 52° at the release's ends
+(> 80 m). About half of all flank steps are interior. Only 4–7% have no reached
+slab within the band on one side. The fall axes drop the closing part of D,
+and the front axes count part of it as shear. So the axes change the outcome
+under either criterion: on the five triggers, the front axes would turn 116
+of 203 failing edge steps into breaks.
+
+**Evaluation across events.** `examples/evaluate_slab_crack_modes.py` scores
+every variant on every event in `data/events.json`. That is 14 variants:
+shear, opening, and mixed × criterion × failure rule × axes. Validation and
+calibration events are pooled separately. Jan 18 is a calibration event, so
+its table describes the variants and cannot choose between them. Jan 18 at
+calibration 2026-11-17.1 (`outputs/slab_mode_eval/2026-11-19`):
+
+| variant | E[IoU] | E[area]/obs | Brier skill | inside median IoU |
+|---|---|---|---|---|
+| shear | 0.662 | 1.07 | 0.368 | 0.675 |
+| opening | 0.662 | 1.12 | 0.341 | 0.654 |
+| mixed energy stop fall / front_edge / front | 0.657 / 0.657 / 0.671 | 1.13 / 1.12 / 1.08 | 0.316 / 0.321 / 0.374 | 0.654 / 0.654 / 0.658 |
+| mixed energy intact fall / front_edge / front | 0.681 / 0.671 / 0.675 | 0.98 / 1.02 / 1.06 | 0.435 / 0.402 / 0.381 | 0.670 / 0.670 / 0.672 |
+| mixed elliptic stop fall / front_edge / front | 0.658 / 0.657 / 0.672 | 1.13 / 1.12 / 1.08 | 0.317 / 0.321 / 0.374 | 0.654 / 0.654 / 0.664 |
+| mixed elliptic intact fall / front_edge / front | 0.682 / 0.672 / 0.675 | 0.98 / 1.02 / 1.07 | 0.439 / 0.405 / 0.380 | 0.671 / 0.670 / 0.672 |
+
+The fall-axis rows reproduce the 11-18 run exactly. Ski non-triggers release
+0/46 in every variant.
+
+**Default axes: `'fall'`, to be re-evaluated (Ron, 2026-11-19).** The front
+axes were the default for part of 11-19. Ron set the default back to
+`'fall'` until more avalanches are in `data/events.json`; then the three
+options are compared again with `evaluate_slab_crack_modes.py`. On Jan 18
+(mixed energy intact) `front_edge` leaves 52–56 intact cells per trigger
+against 57–62 under `'fall'`, keeps part of the SE lobe below the survey,
+and releases ~250 m² more (trigger 1772: 5 858 vs 5 603 m²). Which cells flip,
+and why, has not been traced.
+
+**Open: the flank load length (Ron, 2026-11-19: keep L for now, revisit).**
+Every flank stress above (and the opening toughness gate) uses
+σ = ρ g L drive |d| / 2, with L the along-slope extent of the column through
+the cell, ~138 m on Jan 18 (nearly the whole release). This has no
+derivation here. By force balance, a block of width W held by its two flanks
+loads each flank with ρ g (W/2) drive, which does not depend on the block's
+length. On Jan 18 W/2 ÷ L has median 0.24 (W median 65 m), so L overstates
+the flank load ~4×. Measured on mixed energy intact front_edge
+(`examples/flank_load_blocks_jan18.py`): flank steps that break, 33% with
+L, 14% with W/2, 7% if L is cut to release-scale blocks (L*, below). Decide
+on mechanics, not on Jan 18, before a mixed default is chosen.
+
+#### Release-scale slab tension (diagnostic, 2026-11-19)
+
+The BFS tensile gate tests each cluster once, at the initiation scale (its
+own r_c). Nothing re-tests an admitted cluster as the detached slab below it
+grows. `examples/release_scale_tension_jan18.py` replays the BFS rings and,
+after each ring, computes the crown tension from the detached slab below each
+admitted cluster: σ = g · drive · ρh · L_below / h, drive = sin θ − tan φ cos θ
+with φ = `PHI_DEG` (27°, the crack-tip friction), over a unit-width strip
+held by the crown only (flanks unloaded, so an upper bound). On Jan 18:
+
+- σ reaches σt after L* ≈ 11–13 m of detached slab (median; p10 5 m, p90
+  28 m).
+- The first exceedance comes at BFS ring 1–4, ~8 m from the trigger. The
+  first gate crack comes at ring ~6 or later (before it in 95% of shots).
+- 79% of admitted clusters exceed σt by the end of the BFS; drive > 0 on 99%.
+- Above atan(`SEVERED_SLIDE_MU`) = 31.8° the blocks slide anyway, so a
+  re-test would fragment the slab without moving the outline (94% exceed
+  there). The only band where it could matter is 27–31.8° (38% of admitted
+  clusters, 54% of them exceed): the crack runs but a cut-off block does not
+  slide. The two frictions are distinct on purpose (Ron): 27° governs
+  supershear crack propagation under the still-suspended slab, 31.8° the
+  slab's sliding.
+
+So a release-scale crown rule is not built. `examples/plot_tension_jan18.py`
+maps it.
+
+#### Release animation
+
+`examples/animate_release_jan18.py --mode <variant> [--triggers ...]` writes
+one video per trigger (plus its last frame as PNG). Left: the BFS rings, the
+tensile-gate cracks at the ring they occur, then the slab-crack lines step
+by step, then the released polygon with everything admitted but dropped
+(severed, intact, cut off) in grey. Right: the release-scale σ/σt above,
+with fall-line arrows scaled by drive (black above 31.8°). The time axis is
+BFS ring and line step, not seconds; in the model the lines run after the
+BFS and their order does not matter. It uses the diagnostics-only
+`lines_out=` argument of `slab_crack_lines` (each line's cells in order).
 
 ### Severed slab slides (`USE_SEVERED_SLIDE`, on since 2026-11-13)
 

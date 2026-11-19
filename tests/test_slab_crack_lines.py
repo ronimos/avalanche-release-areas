@@ -127,7 +127,7 @@ def _ridge(tilt_deg):
 
 def test_opening_default_and_cli():
     assert config.SLAB_CRACK_MODE == 'opening'
-    assert config.SLAB_CRACK_MODES == ('opening', 'shear')
+    assert config.SLAB_CRACK_MODES == ('opening', 'shear', 'mixed')
     from release_areas import generate_scenarios as gs
     import inspect
     src = inspect.getsource(gs)
@@ -328,3 +328,196 @@ def test_opening_toughness_off_and_shear_unaffected(monkeypatch):
     assert _tough(1e12, mode='shear')[2] == set()
     monkeypatch.setattr(config, 'USE_OPENING_TOUGHNESS', False)
     assert _tough(1e12)[2] == set()
+
+
+# --- Mixed mode (config.SLAB_CRACK_MODE = 'mixed', Ron 2026-11-18) ----------
+
+def _run_mixed(cracks, trigger, reached, kic=None, criterion='energy', on_fail='stop',
+               fall_of=None, monkeypatch=None, intact=None, axes='fall', **kw):
+    """The split tests pin the fall-line axes (the 2026-11-18 runs); the
+    front axes have their own section below."""
+    monkeypatch.setattr(config, 'MIXED_CRITERION', criterion)
+    monkeypatch.setattr(config, 'MIXED_ON_FAIL', on_fail)
+    monkeypatch.setattr(config, 'MIXED_AXES', axes)
+    cmap, cid, cent, nb, props = _grid()
+    if kic is not None:
+        for p in props.values():
+            p[config.TOUGHNESS_K_COL] = kic
+    return rg.slab_crack_lines(reached, cracks, trigger, nb, cent, FALL, props,
+                               lambda c: 38.0, cmap, mode='mixed', fall_of=fall_of,
+                               intact_out=intact, **kw)
+
+
+def test_mixed_pure_shear_load_runs_like_shear(monkeypatch):
+    """Edge flank on a plane: the detached side slides past the attached one
+    (pure Mode II). 'mixed' runs it, as 'shear' does; 'opening' does not."""
+    x, region, cid = _edge('west')
+    sev, st = _run_mixed({x: 'flank'}, cid(6, 2), region, kic=1e3,
+                         fall_of=_ridge(0.0), monkeypatch=monkeypatch)
+    sh_sev, sh = _run({x: 'flank'}, cid(6, 2), region, mode='shear')
+    assert st['line_flank'] == sh['line_flank'] == N - 1
+    assert sev == sh_sev
+    _, op = _run({x: 'flank'}, cid(6, 2), region, mode='opening', fall_of=_ridge(0.0))
+    assert op['line_clusters'] == 0
+
+
+def test_mixed_sides_moving_together_do_not_break(monkeypatch):
+    """Interior flank on a plane: both sides move down the same fall line, so
+    nothing loads the line (D = 0). 'shear' cuts the east side off here."""
+    _, cid, cent, _, _ = _grid()
+    x = cid(6, 6)
+    reached = set(cent) - {x}
+    sev, st = _run_mixed({x: 'flank'}, cid(6, 2), reached, kic=1e3,
+                         fall_of=_ridge(0.0), monkeypatch=monkeypatch)
+    assert sev == set() and st['line_flank'] == 0
+    assert _run({x: 'flank'}, cid(6, 2), reached, mode='shear')[0]
+
+
+def test_mixed_pure_opening_load_runs_like_opening(monkeypatch):
+    """Interior flank on a symmetric convex roll: the along-line parts cancel,
+    D is pure opening, and 'mixed' cuts what 'opening' cuts."""
+    _, cid, cent, _, _ = _grid()
+    x = cid(6, 6)
+    reached = set(cent) - {x}
+    sev, st = _run_mixed({x: 'flank'}, cid(6, 2), reached, kic=1.0,
+                         fall_of=_ridge(15.0), monkeypatch=monkeypatch)
+    op_sev, op = _run({x: 'flank'}, cid(6, 2), reached, mode='opening', fall_of=_ridge(15.0))
+    assert sev == op_sev == {cid(r, c) for r in range(N) for c in range(7, N)}
+    assert st['line_flank'] == op['line_flank']
+
+
+def test_mixed_gully_has_no_opening_and_no_shear(monkeypatch):
+    """Converging interior sides close the line (no K_I) and their along-line
+    parts cancel (no K_II)."""
+    _, cid, cent, _, _ = _grid()
+    x = cid(6, 6)
+    sev, st = _run_mixed({x: 'flank'}, cid(6, 2), set(cent) - {x}, kic=1.0,
+                         fall_of=_ridge(-15.0), monkeypatch=monkeypatch)
+    assert st['line_flank'] == 0
+
+
+def test_mixed_stop_vs_intact(monkeypatch):
+    """A slab too tough to break: 'stop' ends the line, 'intact' runs it on and
+    marks every step intact."""
+    x, region, cid = _edge('west')
+    _, st = _run_mixed({x: 'flank'}, cid(6, 2), region, kic=1e6, on_fail='stop',
+                       fall_of=_ridge(0.0), monkeypatch=monkeypatch)
+    assert st['line_flank'] == 0 and st['mixed_fail'] == 2
+    intact = set()
+    _, st = _run_mixed({x: 'flank'}, cid(6, 2), region, kic=1e6, on_fail='intact',
+                       fall_of=_ridge(0.0), monkeypatch=monkeypatch, intact=intact)
+    assert st['line_flank'] == N - 1 and len(intact) == N - 1
+
+
+def test_mixed_elliptic_breaks_shear_more_easily(monkeypatch):
+    """Pure Mode II load with K_II between K_IIc = K_Ic/1.4 and K_Ic: the
+    elliptic criterion breaks the slab, the energy criterion does not."""
+    assert config.K_IIC_OVER_K_IC == pytest.approx(1 / 1.4)
+    x, region, cid = _edge('west')
+    kw = dict(kic=5e4, fall_of=_ridge(0.0), monkeypatch=monkeypatch)
+    _, en = _run_mixed({x: 'flank'}, cid(6, 2), region, criterion='energy', **kw)
+    _, el = _run_mixed({x: 'flank'}, cid(6, 2), region, criterion='elliptic', **kw)
+    assert en['line_flank'] == 0 and el['line_flank'] == N - 1
+
+
+def test_mixed_rejects_unknown_settings(monkeypatch):
+    x, region, cid = _edge('west')
+    with pytest.raises(ValueError):
+        _run_mixed({x: 'flank'}, cid(6, 2), region, criterion='tresca', monkeypatch=monkeypatch)
+    with pytest.raises(ValueError):
+        _run_mixed({x: 'flank'}, cid(6, 2), region, on_fail='maybe', monkeypatch=monkeypatch)
+    with pytest.raises(ValueError):
+        _run_mixed({x: 'flank'}, cid(6, 2), region, axes='radial', monkeypatch=monkeypatch)
+
+
+# --- Mixed split on the weak-layer front's axes (config.MIXED_AXES, 2026-11-19)
+
+def test_mixed_axes_default_and_cli():
+    assert config.MIXED_AXES == 'fall'
+    assert set(config.MIXED_AXES_OPTIONS) == {'front_edge', 'fall', 'front'}
+    assert config.FRONT_FIT_RADIUS_M == 2 * config.SLAB_CRACK_BAND_M
+    from release_areas import generate_scenarios as gs
+    assert '--mixed-axes' in inspect.getsource(gs)
+
+
+def _front(alpha_deg):
+    """A straight front whose normal is the cross axis (east) turned alpha_deg
+    toward the fall line (south); ring = distance along that normal. alpha 0
+    is a front running down the fall line."""
+    _, _, cent, _, _ = _grid()
+    a = np.radians(alpha_deg)
+    nu = (np.cos(a) * 1.0 + np.sin(a) * FALL[0], np.sin(a) * FALL[1])
+    return {c: xy[0] * nu[0] + xy[1] * nu[1] for c, xy in cent.items()}
+
+
+def _mixed_trace(monkeypatch, axes, ring, edge=True, kic=1.0):
+    if edge:
+        x, region, cid = _edge('west')
+    else:
+        _, cid, cent, _, _ = _grid()
+        x = cid(6, 6)
+        region = set(cent) - {x}
+    trace = []
+    _run_mixed({x: 'flank'}, cid(6, 2), region, kic=kic, fall_of=_ridge(0.0),
+               monkeypatch=monkeypatch, axes=axes, trace_out=trace, front_ring=ring)
+    return [t for t in trace if 'd_open' in t]
+
+
+@pytest.mark.parametrize('axes', ['front_edge', 'front'])
+def test_front_axes_on_a_front_along_the_fall_line_equal_fall_axes(monkeypatch, axes):
+    """Trigger far from the flank: the front reaches the edge running down the
+    fall line, and the front axes are the fall-line axes."""
+    tf = _mixed_trace(monkeypatch, axes, _front(0.0))
+    tl = _mixed_trace(monkeypatch, 'fall', _front(0.0))
+    assert tf and [t['axes'] for t in tf] == ['front'] * len(tf)
+    assert [t['cid'] for t in tf] == [t['cid'] for t in tl]
+    for a, b in zip(tf, tl):
+        assert a['d_open'] == pytest.approx(b['d_open'], abs=1e-9)
+        assert a['d_shear'] == pytest.approx(b['d_shear'], abs=1e-9)
+
+
+@pytest.mark.parametrize('alpha, d_open', [(-30.0, 0.5), (30.0, 0.0)])
+def test_front_axes_on_a_tilted_front_split_the_edge_load(monkeypatch, alpha, d_open):
+    """Detached slab west of the line slides due south past attached slab
+    (D = -fall). On fall axes that is pure shear. With the front tilted 30 deg
+    the same motion is opening sin 30 = 0.5 plus shear cos 30 where the line
+    leans so the detached side pulls away; where it leans the other way the
+    opening part is closing and only cos 30 remains."""
+    tr = _mixed_trace(monkeypatch, 'front_edge', _front(alpha))
+    assert tr and all(t['axes'] == 'front' for t in tr)
+    for t in tr:
+        assert t['d_open'] == pytest.approx(d_open, abs=1e-9)
+        assert t['d_shear'] == pytest.approx(np.cos(np.radians(30.0)), abs=1e-9)
+    for t in _mixed_trace(monkeypatch, 'fall', _front(alpha)):
+        assert t['axes'] == 'fall'
+        assert t['d_open'] == pytest.approx(0.0) and t['d_shear'] == pytest.approx(1.0)
+
+
+def test_front_edge_keeps_fall_axes_inside_the_release(monkeypatch):
+    """An interior flank (no unadmitted neighbour; the crack's own start cell
+    does not count) keeps the fall axes under 'front_edge'; 'front' turns them."""
+    ring = _front(-30.0)
+    ti =_mixed_trace(monkeypatch, 'front_edge', ring, edge=False, kic=1e9)
+    tf = _mixed_trace(monkeypatch, 'front', ring, edge=False, kic=1e9)
+    assert ti and all(t['axes'] == 'fall' for t in ti)
+    assert tf and all(t['axes'] == 'front' for t in tf)
+
+
+def test_front_ring_defaults_to_the_hop_count(monkeypatch):
+    """Without front_ring the rings are the BFS hop count from the trigger
+    through reached clusters, and the result does not depend on that choice
+    being passed in or computed."""
+    from collections import deque
+    x, region, cid = _edge('west')
+    _, _, _, nb, _ = _grid()
+    hop = {cid(6, 2): 0}
+    q = deque([cid(6, 2)])
+    while q:
+        c = q.popleft()
+        for u in nb[c]:
+            if u in region and u not in hop:
+                hop[u] = hop[c] + 1
+                q.append(u)
+    a = _mixed_trace(monkeypatch, 'front_edge', None)
+    b = _mixed_trace(monkeypatch, 'front_edge', hop)
+    assert a == b

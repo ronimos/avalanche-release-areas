@@ -28,7 +28,14 @@ G_WL     = 0.2e6   # weak-layer shear modulus (Pa). Meloche et al. (2025) Table 
                    # here (not in the arXiv:2406.01360v1 preprint's bibliography;
                    # the final JGR text was not checked) -- see methods §4, §6, §9.
 NU       = 0.3     # slab Poisson's ratio
-PHI_DEG  = 27.0    # snow friction angle (degrees)
+PHI_DEG  = 27.0    # snow friction angle (degrees): friction of the broken weak
+                   # layer behind the crack tip, where the slab is still
+                   # suspended above the substrate. It is the friction that lets
+                   # a supershear crack run or stops it (drive = sin - tan(phi) cos
+                   # in the crack-line load tests). Deliberately NOT the sliding
+                   # friction SEVERED_SLIDE_MU (31.8 deg), which limits slab motion
+                   # down the slope (Ron, 2026-11-19): a crack runs above 27 deg,
+                   # but a slab slides only above 31.8 deg.
 DELTA    = 1.0     # Meloche softening coefficient δ. Matches the paper's own
                    # full-slope-scale campaign (Table 1); their Fig. 8 brittle
                    # runs, which calibrate C and R_FIT, used δ = 0.
@@ -489,8 +496,65 @@ SLAB_CRACK_ALIGN_COS = 0.707   # a line step must lie within 45 deg of the line
 #     Holds where a long up/down strip has already lost contact with the weak
 #     layer and the crack sweeps across the slope with a straight front. Every
 #     release before 2026-11-16 used it.
-SLAB_CRACK_MODE  = 'opening'   # 'opening' | 'shear'
-SLAB_CRACK_MODES = ('opening', 'shear')
+#   'mixed' (Ron, 2026-11-18, experiment): a flank is a mixed-mode crack. The
+#     relative motion of the slab across the line, D = drive (F+ - F-) with
+#     local fall lines and the attached side stationary (F = 0), splits into
+#     an opening part D.e (K_I, only when the sides pull apart) and a shear
+#     part D.t along the line (K_II), each sigma = rho g L |part| / 2 and
+#     K = TOUGHNESS_EDGE_F sigma sqrt(pi a). The split is the weight: no
+#     knob. Two sides that move together (D ~ 0) do not break. Crowns as in
+#     the other modes. See MIXED_CRITERION and MIXED_ON_FAIL.
+SLAB_CRACK_MODE  = 'opening'   # 'opening' | 'shear' | 'mixed'
+SLAB_CRACK_MODES = ('opening', 'shear', 'mixed')
+
+# 'mixed' flank fracture criterion, against K_Ic = TOUGHNESS_K_COL:
+#   'energy'   G_I + G_II >= G_c, i.e. K_I^2 + K_II^2 >= K_Ic^2 (same E' for
+#              both modes; no new parameter).
+#   'elliptic' (K_I/K_Ic)^2 + (K_II/K_IIc)^2 >= 1, K_IIc = K_IIC_OVER_K_IC K_Ic.
+MIXED_CRITERION  = 'energy'
+MIXED_CRITERIA   = ('energy', 'elliptic')
+# Schweizer, Michot & Kirchner (2004) Ann. Glaciol. 38, abstract: "The
+# fracture toughness in tension K_Ic was found to be larger (by about a factor
+# of 1.4) than in shear K_IIc" (cantilever beams, rho 100-300). Verified
+# against the PDF 2026-11-18.
+K_IIC_OVER_K_IC  = 1.0 / 1.4
+# Where a 'mixed' flank step fails the criterion:
+#   'stop'   the line ends there (a crack does not run into slab it cannot break)
+#   'intact' the line runs on and the cell is removed after the cut, as
+#            USE_OPENING_TOUGHNESS does for 'opening' (never adds area)
+MIXED_ON_FAIL    = 'stop'
+MIXED_ON_FAILS   = ('stop', 'intact')
+# Axes of the 'mixed' split (Ron, 2026-11-19). The relative motion D across a
+# flank splits into opening (D.e) and shear (D.t), with t the direction the
+# slab breaks along and e normal to it:
+#   'front_edge' at an edge flank (a cell with a BFS neighbour that is neither
+#                admitted nor a slab-crack start) t is the tangent of the weak-layer front:
+#                e = the gradient of the BFS arrival ring, a least-squares
+#                plane through the admitted clusters within FRONT_FIT_RADIUS_M.
+#                The slab at the release's edge breaks along the line where the
+#                front stopped; near the trigger that front is curved, so the
+#                downslope motion of the detached slab loads the edge partly in
+#                opening. Inside the release the line is not a front (the front
+#                there runs across it), so interior flanks keep 'fall'.
+#   'fall'       t = the cell's own fall line everywhere (every 'mixed' run of
+#                2026-11-18).
+#   'front'      front axes at every flank step (inside the release too).
+# On Jan 18 the edge front is a median 25-40 deg off the fall line (42 deg within
+# 10 m of the trigger, 25-27 deg at 10-80 m, 52 deg at the release's ends;
+# examples/alpha_jan18.py). The fall axes drop the closing part of D, which
+# the front axes partly count as shear, so the axes move the outcome under
+# either criterion. Where the plane fit has too few clusters (< 4), the step
+# keeps the fall axes.
+# Default 'fall' (Ron, 2026-11-19, after a day on 'front_edge'): keep the
+# fall axes for now and re-evaluate all three with
+# examples/evaluate_slab_crack_modes.py once more avalanches are in
+# data/events.json. Jan 18 alone cannot choose (it is a calibration event).
+MIXED_AXES         = 'fall'
+MIXED_AXES_OPTIONS = ('front_edge', 'fall', 'front')
+# Radius of the front-normal plane fit: 2 x SLAB_CRACK_BAND_M, so the fit spans
+# the same strip as the load test. Not calibrated; 5 m and 15 m give edge-alpha
+# medians within a few degrees of 10 m on Jan 18.
+FRONT_FIT_RADIUS_M = 10.0
 
 # Toughness gate on 'opening' flanks (Ron, 2026-11-16; both repos; CLI
 # --[no-]opening-toughness). The no-toughness argument for running lines (K/K_c
@@ -579,4 +643,6 @@ ENERGY_R            = None           # energy ratio R; None = R_FIT (Meloche Fig
 # which three you get is decided by the ordering of a tie, not by a margin —
 # see methods §8 item 5. Override with --n-triggers.
 N_TOP_TRIGGERS   = 3
-SIZE_FACTORS     = [1.0]   # release size multipliers; one polygon per trigger
+# One scenario per trigger (Ron, 2026-11-18): a single size multiplier, not a
+# sweep. Scales the BFS distance caps and discontinuity thresholds.
+SIZE_FACTOR      = 1.0

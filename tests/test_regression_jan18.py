@@ -57,8 +57,26 @@ def _run(out_dir, *extra):
 
 
 @pytest.fixture(scope='module')
-def default_summary(tmp_path_factory):
-    return _run(tmp_path_factory.mktemp('jan18_default'))
+def default_out(tmp_path_factory):
+    out = tmp_path_factory.mktemp('jan18_default')
+    # A leftover from an earlier, larger run: it must not survive.
+    (out / 'scenarios' / 'scenario_009').mkdir(parents=True)
+    _run(out)
+    return out
+
+
+@pytest.fixture(scope='module')
+def default_summary(default_out):
+    return pd.read_csv(default_out / 'scenario_summary.csv')
+
+
+def test_one_scenario_per_trigger(default_out, default_summary):
+    """Each trigger gets exactly one scenario, in the summary and on disk."""
+    trig = default_summary['trigger_cluster']
+    assert trig.is_unique
+    dirs = sorted(p.name for p in (default_out / 'scenarios').iterdir())
+    assert dirs == sorted(default_summary['scenario_id'])
+    assert len(dirs) == len(trig)
 
 
 def test_default_triggers(default_summary):

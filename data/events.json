@@ -1,0 +1,15 @@
+{
+ "_doc": "Avalanche events for the slab-fracture-mode evaluation (examples/evaluate_slab_crack_modes.py). Paths are relative to data/<slope>/, which must hold the data/little_prof layout: spatial/cluster_map.tif, dem_1m.tif, boundaries/start_zone.kml, and the calibration preset's features_dir with all_start_zone_features_<date>.csv and meloche_features_all_<date>.csv. role: 'calibration' if any model knob was fitted on the event (scores are reported, never pooled as validation), 'validation' otherwise. ski: non-trigger points JSON (points_lat_lon) or null.",
+ "events": [
+  {
+   "id": "little_prof_2026-01-18",
+   "slope": "little_prof",
+   "date": "2026-01-18",
+   "role": "calibration",
+   "calibration": "calibration_2026-11-17.1.json",
+   "observed": "validation/survey_release_area_20260118.geojson",
+   "ski": "validation/ski_nontriggers_20260118.json",
+   "note": "Survey polygon 5 810 m2; avachain calibration 2026-11-17.1 was fitted on it."
+  }
+ ]
+}

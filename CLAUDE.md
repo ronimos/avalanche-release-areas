@@ -83,6 +83,64 @@ with this block, this block wins.
   adds area. Crowns and shear flanks need no toughness test (K/K_Ic ≥ 30 at
   p10 on Jan 18); opening flanks do (14% of steps below 1). Methods doc §
   Running slab cracks.
+- **2026-11-18 (Ron): one scenario per trigger, always.** `--size-factors`
+  (list) is now `--size-factor` (one value, `config.SIZE_FACTOR = 1.0`);
+  there is no size sweep. Duplicate trigger IDs are dropped, and stale
+  `scenario_*` dirs in `--out-dir` are removed at the start of a run.
+  `test_regression_jan18.py::test_one_scenario_per_trigger` pins it.
+- **2026-11-18 (Ron): Jan 18 calibration scoring runs here**, on
+  `data/little_prof`, with SNOWPACK features from avachain.
+  `examples/score_jan18.py` ports avachain's `inside_release_sweep.py` and
+  five-trigger `event_scoring` (`src/release_areas/scoring.py`). Its preset is
+  `data/little_prof/calibration_2026-11-17.1.json`; the features are
+  `data/little_prof/features/cal_2026-11-17.1/`, from avachain `analyze`
+  (Little Professor TOML, facet_a 0.75, 00:00; facet_a acts at feature time).
+  Targets: `data/little_prof/validation/` (survey polygon 5 810 m², 46 ski
+  non-trigger points). Parity with avachain, verified 11-18: five-trigger
+  E[IoU] 0.662 / E[area] 6 233 (shear), 6 482 (opening), AUC 0.850, the same
+  five triggers; all 360 forced shots of avachain's 11-16 sweep give the same
+  outcome here. `test_score_jan18_calibrated.py` pins the five-trigger
+  scores. `make_release_polygon_2d(rectangle_fallback=False)` is ported for
+  the forced shots.
+- **2026-11-18 (Ron): `SLAB_CRACK_MODE = 'mixed'`, an experiment, not the
+  default.** A flank splits the relative motion across the line,
+  drive·(F₊ − F₋) (attached side F = 0), into opening (K_I) and shear (K_II).
+  `MIXED_CRITERION`: `'energy'` (K_I² + K_II² ≥ K_Ic²) or `'elliptic'`
+  (K_IIc = K_Ic/1.4, Schweizer et al. 2004 abstract). `MIXED_ON_FAIL`: `'stop'`
+  or `'intact'`. Jan 18 at cal 11-17.1 (`outputs/score_jan18/mixed_2026-11-18`):
+  five-trigger E[IoU] shear 0.662 / opening 0.662 / mixed stop 0.657–0.658 /
+  mixed intact 0.681–0.682 (E[area] 5 692–5 699 m², Brier skill 0.44); inside
+  median IoU 0.675 / 0.654 / 0.654 / 0.670–0.671; ski 0/46 everywhere. Energy
+  and elliptic barely differ. 'intact' removes the SE lobe below the release;
+  'stop' behaves like opening. No decision yet (Ron).
+- **2026-11-19 (Ron): `MIXED_AXES`** (CLI `--mixed-axes`). Default **`'fall'`**
+  (the 11-18 runs); Ron set it back from `'front_edge'` the same day, to be
+  re-evaluated once more avalanches are in `data/events.json`. Under
+  `'front_edge'`, at an edge
+  flank the mixed split uses the weak-layer front's tangent (gradient of the
+  BFS arrival ring, plane fit within `FRONT_FIT_RADIUS_M` = 10 m) instead of
+  the fall line; interior flanks keep the fall line. Jan 18 edge α median 38°
+  (`examples/alpha_jan18.py`). Every option stays in the code for
+  re-evaluation. **Fracture-mode evaluation across events:**
+  `examples/evaluate_slab_crack_modes.py` scores all 14 variants on every
+  event in `data/events.json` and pools validation and calibration events
+  separately. To add an avalanche, put its data under `data/<slope>/` and
+  append an entry. `score_jan18.py` takes `--data-dir`/`--date`; a variant is
+  `mixed:<criterion>:<on_fail>[:<axes>]`, and a missing axes part means
+  the default (`fall`). Jan 18
+  (`outputs/slab_mode_eval/2026-11-19`): intact E[IoU] 0.681 fall / 0.671
+  front_edge / 0.675 front; stop 0.657 / 0.657 / 0.671. Methods doc § Mixed
+  mode.
+- **2026-11-19, open (Ron: keep for now, revisit):** flank stress uses the
+  column length L (~138 m on Jan 18), not W/2 from force balance (~4× lower).
+  Revisit before a mixed default is chosen. Diagnostics added the same day:
+  release-scale crown tension (`examples/release_scale_tension_jan18.py`;
+  σ ≥ σt after ~11–13 m of detached slab, so a re-test only fragments the
+  slab; only the 27–31.8° band could matter) and a release animation
+  (`examples/animate_release_jan18.py`). Methods doc § Mixed mode,
+  § Release-scale slab tension, § Release animation. `PHI_DEG` (27°,
+  crack tip) and `SEVERED_SLIDE_MU` (31.8°, sliding) are different on
+  purpose; never unify them.
 - **Reference CSVs** come from avachain's 2026-10-27 forcing rebuild. That
   rebuild removed 21 false avalanche corrections from the forcing (Ron: Jan 18
   is the only avalanche of the season) and aligned the reinit time.
@@ -115,8 +173,8 @@ with this block, this block wins.
   and is Ron's decision.
 - **Env trap:** never `uv run --active` here from an avachain shell; it syncs
   this lock into avachain's venv. Use `env -u VIRTUAL_ENV uv run --frozen pytest`.
-- **Nothing pushed** since 2026-10-26 in either repo; Ron holds pushes until
-  the work is settled.
+- **Pushes:** Ron decides each push. This repo's `master` was pushed on
+  2026-11-19 (the 11-18/11-19 scoring and mixed-mode work).
 
 ## Package layout
 
